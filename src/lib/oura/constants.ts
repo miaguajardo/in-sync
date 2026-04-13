@@ -1,5 +1,7 @@
 export const OURA_AUTHORIZE_URL = "https://cloud.ouraring.com/oauth/authorize";
 export const OURA_TOKEN_URL = "https://api.ouraring.com/oauth/token";
+/** Oura Cloud API v2 origin (usercollection routes). */
+export const OURA_API_BASE = "https://api.ouraring.com";
 
 /** HttpOnly cookie holding the OAuth `state` value (CSRF). */
 export const OURA_STATE_COOKIE = "oura_oauth_state";

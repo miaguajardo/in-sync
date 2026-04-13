@@ -35,6 +35,40 @@ export default async function Home({
           ouraErrorDescription={sp.oura_error_description}
         />
 
+        <section className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+          <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">V1 pages</h2>
+          <p className="mt-1 text-sm leading-6 text-zinc-600 dark:text-zinc-400">
+            Log structured workouts, browse Oura-detected sessions, then attach them on the link page.
+          </p>
+          <ul className="mt-4 list-inside list-disc space-y-1 text-sm text-zinc-700 dark:text-zinc-300">
+            <li>
+              <Link className="font-medium underline-offset-4 hover:underline" href="/workouts">
+                Workouts
+              </Link>{" "}
+              — exercises, sets, reps, optional weight.
+            </li>
+            <li>
+              <Link className="font-medium underline-offset-4 hover:underline" href="/oura">
+                Oura hub
+              </Link>{" "}
+              — workouts from the ring (more data types soon).
+            </li>
+            <li>
+              <Link className="font-medium underline-offset-4 hover:underline" href="/link">
+                Link
+              </Link>{" "}
+              — connect an Oura workout to a logged session.
+            </li>
+          </ul>
+          <p className="mt-3 text-xs text-zinc-500 dark:text-zinc-500">
+            Supabase stores gym data; Oura tokens stay in{" "}
+            <code className="rounded bg-zinc-100 px-1 py-0.5 text-[0.7rem] dark:bg-zinc-900">
+              .data/oura-tokens.json
+            </code>{" "}
+            locally until you move them to the cloud.
+          </p>
+        </section>
+
         <p className="text-sm text-zinc-500 dark:text-zinc-400">
           Legal:{" "}
           <Link
