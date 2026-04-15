@@ -3,10 +3,18 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { WorkoutWithChildren, WorkoutWriteInput } from "@/lib/workouts/types";
+import type { WorkoutBlockType, WorkoutWithChildren, WorkoutWriteInput } from "@/lib/workouts/types";
 
 type SetDraft = { reps: string; weight_kg: string; notes: string };
 type ExerciseDraft = { name: string; sets: SetDraft[] };
+
+type BlockDraft = {
+  type: WorkoutBlockType;
+  name: string;
+  rounds: string;
+  restSeconds: string;
+  exercises: ExerciseDraft[];
+};
 
 function toDatetimeLocalValue(iso: string): string {
   const d = new Date(iso);
@@ -21,38 +29,94 @@ function fromDatetimeLocalValue(value: string): string {
   return new Date(value).toISOString();
 }
 
-function defaultDraft(): ExerciseDraft {
+function defaultExercise(): ExerciseDraft {
   return {
     name: "",
     sets: [{ reps: "10", weight_kg: "", notes: "" }],
   };
 }
 
+function defaultSingleBlock(): BlockDraft {
+  return {
+    type: "single",
+    name: "",
+    rounds: "",
+    restSeconds: "",
+    exercises: [defaultExercise()],
+  };
+}
+
+function defaultSupersetBlock(): BlockDraft {
+  return {
+    type: "superset",
+    name: "",
+    rounds: "",
+    restSeconds: "90",
+    exercises: [defaultExercise(), { name: "", sets: [{ reps: "10", weight_kg: "", notes: "" }] }],
+  };
+}
+
+function defaultCircuitBlock(): BlockDraft {
+  return {
+    type: "circuit",
+    name: "",
+    rounds: "3",
+    restSeconds: "",
+    exercises: [
+      defaultExercise(),
+      { name: "", sets: [{ reps: "15", weight_kg: "", notes: "" }] },
+    ],
+  };
+}
+
+function parseOptionalPositiveInt(s: string): number | null {
+  const t = s.trim();
+  if (!t) return null;
+  const n = Number.parseInt(t, 10);
+  if (!Number.isFinite(n) || n < 1) return null;
+  return n;
+}
+
+function parseOptionalNonNegInt(s: string): number | null {
+  const t = s.trim();
+  if (!t) return null;
+  const n = Number.parseInt(t, 10);
+  if (!Number.isFinite(n) || n < 0) return null;
+  return n;
+}
+
 function buildPayload(
   title: string,
   startedLocal: string,
   notes: string,
-  exercises: ExerciseDraft[],
+  blocks: BlockDraft[],
 ): WorkoutWriteInput {
-  const exercisesOut = exercises.map((ex, i) => ({
-    position: i,
-    name: ex.name,
-    sets: ex.sets.map((s, j) => {
-      const wRaw = s.weight_kg.trim();
-      const wNum = wRaw === "" ? null : Number(wRaw);
-      return {
-        position: j,
-        reps: Math.max(0, Math.floor(Number(s.reps)) || 0),
-        weight_kg: wNum !== null && Number.isFinite(wNum) ? wNum : null,
-        notes: s.notes.trim() ? s.notes : null,
-      };
-    }),
+  const blocksOut = blocks.map((b, blockIdx) => ({
+    position: blockIdx,
+    type: b.type,
+    name: b.name.trim() ? b.name.trim() : null,
+    rounds: parseOptionalPositiveInt(b.rounds),
+    rest_seconds: parseOptionalNonNegInt(b.restSeconds),
+    exercises: b.exercises.map((ex, ei) => ({
+      position: ei,
+      name: ex.name,
+      sets: ex.sets.map((s, si) => {
+        const wRaw = s.weight_kg.trim();
+        const wNum = wRaw === "" ? null : Number(wRaw);
+        return {
+          position: si,
+          reps: Math.max(0, Math.floor(Number(s.reps)) || 0),
+          weight_kg: wNum !== null && Number.isFinite(wNum) ? wNum : null,
+          notes: s.notes.trim() ? s.notes : null,
+        };
+      }),
+    })),
   }));
   return {
     title,
     started_at: fromDatetimeLocalValue(startedLocal),
     notes: notes.trim() ? notes : null,
-    exercises: exercisesOut,
+    blocks: blocksOut,
   };
 }
 
@@ -67,7 +131,7 @@ export function WorkoutForm(props: Props) {
     toDatetimeLocalValue(new Date().toISOString()),
   );
   const [notes, setNotes] = useState("");
-  const [exercises, setExercises] = useState<ExerciseDraft[]>([defaultDraft()]);
+  const [blocks, setBlocks] = useState<BlockDraft[]>([defaultSingleBlock()]);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loading, setLoading] = useState(props.mode === "edit");
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -78,17 +142,23 @@ export function WorkoutForm(props: Props) {
     setTitle(w.title);
     setStartedLocal(toDatetimeLocalValue(w.started_at));
     setNotes(w.notes ?? "");
-    setExercises(
-      w.exercises.length
-        ? w.exercises.map((ex) => ({
-            name: ex.name,
-            sets: ex.sets.map((s) => ({
-              reps: String(s.reps),
-              weight_kg: s.weight_kg === null || s.weight_kg === undefined ? "" : String(s.weight_kg),
-              notes: s.notes ?? "",
+    setBlocks(
+      w.blocks.length
+        ? w.blocks.map((b) => ({
+            type: b.type,
+            name: b.name ?? "",
+            rounds: b.rounds != null ? String(b.rounds) : "",
+            restSeconds: b.rest_seconds != null ? String(b.rest_seconds) : "",
+            exercises: b.exercises.map((ex) => ({
+              name: ex.name,
+              sets: ex.sets.map((s) => ({
+                reps: String(s.reps),
+                weight_kg: s.weight_kg === null || s.weight_kg === undefined ? "" : String(s.weight_kg),
+                notes: s.notes ?? "",
+              })),
             })),
           }))
-        : [defaultDraft()],
+        : [defaultSingleBlock()],
     );
   }, []);
 
@@ -120,8 +190,8 @@ export function WorkoutForm(props: Props) {
   const canDelete = props.mode === "edit";
 
   const payload = useMemo(
-    () => buildPayload(title, startedLocal, notes, exercises),
-    [title, startedLocal, notes, exercises],
+    () => buildPayload(title, startedLocal, notes, blocks),
+    [title, startedLocal, notes, blocks],
   );
 
   async function onSubmit(e: React.FormEvent) {
@@ -166,43 +236,128 @@ export function WorkoutForm(props: Props) {
     }
   }
 
-  function addExercise() {
-    setExercises((prev) => [...prev, defaultDraft()]);
+  function addBlock(kind: WorkoutBlockType) {
+    setBlocks((prev) => [
+      ...prev,
+      kind === "single"
+        ? defaultSingleBlock()
+        : kind === "superset"
+          ? defaultSupersetBlock()
+          : defaultCircuitBlock(),
+    ]);
   }
 
-  function removeExercise(idx: number) {
-    setExercises((prev) => (prev.length <= 1 ? prev : prev.filter((_, i) => i !== idx)));
+  function removeBlock(blockIdx: number) {
+    setBlocks((prev) => (prev.length <= 1 ? prev : prev.filter((_, i) => i !== blockIdx)));
   }
 
-  function updateExerciseName(idx: number, name: string) {
-    setExercises((prev) => prev.map((ex, i) => (i === idx ? { ...ex, name } : ex)));
-  }
-
-  function addSet(exIdx: number) {
-    setExercises((prev) =>
-      prev.map((ex, i) =>
-        i === exIdx ? { ...ex, sets: [...ex.sets, { reps: "10", weight_kg: "", notes: "" }] } : ex,
-      ),
-    );
-  }
-
-  function removeSet(exIdx: number, setIdx: number) {
-    setExercises((prev) =>
-      prev.map((ex, i) => {
-        if (i !== exIdx) return ex;
-        if (ex.sets.length <= 1) return ex;
-        return { ...ex, sets: ex.sets.filter((_, j) => j !== setIdx) };
+  function setBlockType(blockIdx: number, type: WorkoutBlockType) {
+    setBlocks((prev) =>
+      prev.map((b, i) => {
+        if (i !== blockIdx) return b;
+        let exercises = b.exercises;
+        if (type === "single") {
+          exercises = [exercises[0] ?? defaultExercise()];
+        } else if (exercises.length < 2) {
+          exercises = [...exercises, defaultExercise()];
+        }
+        return {
+          ...b,
+          type,
+          exercises,
+          rounds: type === "circuit" && !b.rounds.trim() ? "3" : b.rounds,
+        };
       }),
     );
   }
 
-  function updateSet(exIdx: number, setIdx: number, patch: Partial<SetDraft>) {
-    setExercises((prev) =>
-      prev.map((ex, i) => {
-        if (i !== exIdx) return ex;
+  function updateBlockField(blockIdx: number, patch: Partial<Pick<BlockDraft, "name" | "rounds" | "restSeconds">>) {
+    setBlocks((prev) => prev.map((b, i) => (i === blockIdx ? { ...b, ...patch } : b)));
+  }
+
+  function addExerciseToBlock(blockIdx: number) {
+    setBlocks((prev) =>
+      prev.map((b, i) => {
+        if (i !== blockIdx) return b;
+        if (b.type === "single" && b.exercises.length >= 1) return b;
+        return { ...b, exercises: [...b.exercises, defaultExercise()] };
+      }),
+    );
+  }
+
+  function removeExerciseFromBlock(blockIdx: number, exIdx: number) {
+    setBlocks((prev) =>
+      prev.map((b, i) => {
+        if (i !== blockIdx) return b;
+        const min = b.type === "single" ? 1 : 2;
+        if (b.exercises.length <= min) return b;
+        return { ...b, exercises: b.exercises.filter((_, j) => j !== exIdx) };
+      }),
+    );
+  }
+
+  function updateExerciseName(blockIdx: number, exIdx: number, name: string) {
+    setBlocks((prev) =>
+      prev.map((b, i) => {
+        if (i !== blockIdx) return b;
         return {
-          ...ex,
-          sets: ex.sets.map((s, j) => (j === setIdx ? { ...s, ...patch } : s)),
+          ...b,
+          exercises: b.exercises.map((ex, j) => (j === exIdx ? { ...ex, name } : ex)),
+        };
+      }),
+    );
+  }
+
+  function addSet(blockIdx: number, exIdx: number) {
+    setBlocks((prev) =>
+      prev.map((b, i) => {
+        if (i !== blockIdx) return b;
+        return {
+          ...b,
+          exercises: b.exercises.map((ex, j) =>
+            j === exIdx
+              ? { ...ex, sets: [...ex.sets, { reps: "10", weight_kg: "", notes: "" }] }
+              : ex,
+          ),
+        };
+      }),
+    );
+  }
+
+  function removeSet(blockIdx: number, exIdx: number, setIdx: number) {
+    setBlocks((prev) =>
+      prev.map((b, i) => {
+        if (i !== blockIdx) return b;
+        return {
+          ...b,
+          exercises: b.exercises.map((ex, j) => {
+            if (j !== exIdx) return ex;
+            if (ex.sets.length <= 1) return ex;
+            return { ...ex, sets: ex.sets.filter((_, k) => k !== setIdx) };
+          }),
+        };
+      }),
+    );
+  }
+
+  function updateSet(
+    blockIdx: number,
+    exIdx: number,
+    setIdx: number,
+    patch: Partial<SetDraft>,
+  ) {
+    setBlocks((prev) =>
+      prev.map((b, i) => {
+        if (i !== blockIdx) return b;
+        return {
+          ...b,
+          exercises: b.exercises.map((ex, j) => {
+            if (j !== exIdx) return ex;
+            return {
+              ...ex,
+              sets: ex.sets.map((s, k) => (k === setIdx ? { ...s, ...patch } : s)),
+            };
+          }),
         };
       }),
     );
@@ -255,106 +410,218 @@ export function WorkoutForm(props: Props) {
       </div>
 
       <div className="space-y-6">
-        <div className="flex items-center justify-between gap-4">
-          <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">Exercises</h2>
-          <button
-            type="button"
-            onClick={addExercise}
-            className="rounded-full border border-zinc-300 px-4 py-2 text-sm font-medium text-zinc-800 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
-          >
-            Add exercise
-          </button>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">Blocks</h2>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => addBlock("single")}
+              className="rounded-full border border-zinc-300 px-3 py-2 text-sm font-medium text-zinc-800 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
+            >
+              + Single
+            </button>
+            <button
+              type="button"
+              onClick={() => addBlock("superset")}
+              className="rounded-full border border-zinc-300 px-3 py-2 text-sm font-medium text-zinc-800 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
+            >
+              + Superset
+            </button>
+            <button
+              type="button"
+              onClick={() => addBlock("circuit")}
+              className="rounded-full border border-zinc-300 px-3 py-2 text-sm font-medium text-zinc-800 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
+            >
+              + Circuit
+            </button>
+          </div>
         </div>
 
-        {exercises.map((ex, exIdx) => (
+        {blocks.map((block, blockIdx) => (
           <div
-            key={exIdx}
+            key={blockIdx}
             className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-950"
           >
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <label className="block min-w-[200px] flex-1">
-                <span className="text-sm font-medium text-zinc-800 dark:text-zinc-200">Exercise</span>
-                <input
-                  className="mt-1 w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none ring-zinc-400 focus:ring-2 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-50"
-                  value={ex.name}
-                  onChange={(e) => updateExerciseName(exIdx, e.target.value)}
-                  placeholder="Bench press"
-                  required
-                />
-              </label>
+            <div className="flex flex-wrap items-start justify-between gap-3 border-b border-zinc-100 pb-4 dark:border-zinc-900">
+              <div className="flex flex-wrap items-center gap-3">
+                <label className="text-sm font-medium text-zinc-800 dark:text-zinc-200">
+                  Type
+                  <select
+                    className="ml-2 rounded-lg border border-zinc-200 bg-white px-2 py-1.5 text-sm dark:border-zinc-800 dark:bg-zinc-950"
+                    value={block.type}
+                    onChange={(e) => setBlockType(blockIdx, e.target.value as WorkoutBlockType)}
+                  >
+                    <option value="single">Single</option>
+                    <option value="superset">Superset</option>
+                    <option value="circuit">Circuit</option>
+                  </select>
+                </label>
+                <span className="text-xs text-zinc-500 dark:text-zinc-400">
+                  {block.type === "single" && "One exercise"}
+                  {block.type === "superset" && "Alternate two or more moves"}
+                  {block.type === "circuit" && "Two or more moves; optional rounds"}
+                </span>
+              </div>
               <button
                 type="button"
-                onClick={() => removeExercise(exIdx)}
+                onClick={() => removeBlock(blockIdx)}
                 className="rounded-full px-3 py-2 text-sm text-red-700 hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-950/30"
               >
-                Remove
+                Remove block
               </button>
             </div>
 
-            <div className="mt-4 space-y-3">
+            <div className="mt-4 grid gap-3 sm:grid-cols-2">
+              <label className="block sm:col-span-2">
+                <span className="text-sm font-medium text-zinc-800 dark:text-zinc-200">Block label</span>
+                <input
+                  className="mt-1 w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-950"
+                  value={block.name}
+                  onChange={(e) => updateBlockField(blockIdx, { name: e.target.value })}
+                  placeholder="Optional (e.g. A1/A2)"
+                />
+              </label>
+              {(block.type === "superset" || block.type === "circuit") && (
+                <label className="block">
+                  <span className="text-sm font-medium text-zinc-800 dark:text-zinc-200">Rounds</span>
+                  <input
+                    inputMode="numeric"
+                    className="mt-1 w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-950"
+                    value={block.rounds}
+                    onChange={(e) => updateBlockField(blockIdx, { rounds: e.target.value })}
+                    placeholder="Optional"
+                  />
+                  <span className="mt-1 block text-xs text-zinc-500">Optional note for programming; not enforced on sets.</span>
+                </label>
+              )}
+              <label className="block">
+                <span className="text-sm font-medium text-zinc-800 dark:text-zinc-200">Rest (sec)</span>
+                <input
+                  inputMode="numeric"
+                  className="mt-1 w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-950"
+                  value={block.restSeconds}
+                  onChange={(e) => updateBlockField(blockIdx, { restSeconds: e.target.value })}
+                  placeholder="Optional"
+                />
+              </label>
+            </div>
+
+            <div className="mt-6 space-y-4">
               <div className="flex items-center justify-between">
-                <span className="text-sm font-medium text-zinc-700 dark:text-zinc-300">Sets</span>
-                <button
-                  type="button"
-                  onClick={() => addSet(exIdx)}
-                  className="text-sm font-medium text-zinc-700 underline-offset-4 hover:underline dark:text-zinc-300"
+                <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">Exercises in this block</h3>
+                {block.type !== "single" && (
+                  <button
+                    type="button"
+                    onClick={() => addExerciseToBlock(blockIdx)}
+                    className="text-sm font-medium text-zinc-700 underline-offset-4 hover:underline dark:text-zinc-300"
+                  >
+                    Add exercise
+                  </button>
+                )}
+              </div>
+
+              {block.exercises.map((ex, exIdx) => (
+                <div
+                  key={exIdx}
+                  className="rounded-xl border border-zinc-200 bg-zinc-50/80 p-4 dark:border-zinc-800 dark:bg-zinc-900/40"
                 >
-                  Add set
-                </button>
-              </div>
-              <div className="overflow-x-auto">
-                <table className="w-full min-w-[480px] text-left text-sm">
-                  <thead>
-                    <tr className="text-xs uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
-                      <th className="py-2 pr-3 font-medium">Reps</th>
-                      <th className="py-2 pr-3 font-medium">Weight (kg)</th>
-                      <th className="py-2 pr-3 font-medium">Notes</th>
-                      <th className="py-2 font-medium" />
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {ex.sets.map((s, setIdx) => (
-                      <tr key={setIdx} className="border-t border-zinc-100 dark:border-zinc-900">
-                        <td className="py-2 pr-3 align-top">
-                          <input
-                            inputMode="numeric"
-                            className="w-20 rounded-md border border-zinc-200 bg-white px-2 py-1.5 text-sm dark:border-zinc-800 dark:bg-zinc-950"
-                            value={s.reps}
-                            onChange={(e) => updateSet(exIdx, setIdx, { reps: e.target.value })}
-                            required
-                          />
-                        </td>
-                        <td className="py-2 pr-3 align-top">
-                          <input
-                            inputMode="decimal"
-                            className="w-24 rounded-md border border-zinc-200 bg-white px-2 py-1.5 text-sm dark:border-zinc-800 dark:bg-zinc-950"
-                            value={s.weight_kg}
-                            onChange={(e) => updateSet(exIdx, setIdx, { weight_kg: e.target.value })}
-                            placeholder="—"
-                          />
-                        </td>
-                        <td className="py-2 pr-3 align-top">
-                          <input
-                            className="w-full min-w-[140px] rounded-md border border-zinc-200 bg-white px-2 py-1.5 text-sm dark:border-zinc-800 dark:bg-zinc-950"
-                            value={s.notes}
-                            onChange={(e) => updateSet(exIdx, setIdx, { notes: e.target.value })}
-                            placeholder="Optional"
-                          />
-                        </td>
-                        <td className="py-2 align-top text-right">
-                          <button
-                            type="button"
-                            onClick={() => removeSet(exIdx, setIdx)}
-                            className="text-xs font-medium text-red-700 hover:underline dark:text-red-300"
-                          >
-                            Remove
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <label className="block min-w-[200px] flex-1">
+                      <span className="text-sm font-medium text-zinc-800 dark:text-zinc-200">
+                        Exercise {block.exercises.length > 1 ? exIdx + 1 : ""}
+                      </span>
+                      <input
+                        className="mt-1 w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-950"
+                        value={ex.name}
+                        onChange={(e) => updateExerciseName(blockIdx, exIdx, e.target.value)}
+                        placeholder="Movement name"
+                        required
+                      />
+                    </label>
+                    {(block.type !== "single" || block.exercises.length > 1) && (
+                      <button
+                        type="button"
+                        onClick={() => removeExerciseFromBlock(blockIdx, exIdx)}
+                        className="text-sm text-red-700 hover:underline dark:text-red-300"
+                      >
+                        Remove
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="mt-3 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-medium uppercase tracking-wide text-zinc-500">Sets</span>
+                      <button
+                        type="button"
+                        onClick={() => addSet(blockIdx, exIdx)}
+                        className="text-xs font-medium text-zinc-700 underline-offset-4 hover:underline dark:text-zinc-300"
+                      >
+                        Add set
+                      </button>
+                    </div>
+                    <div className="overflow-x-auto">
+                      <table className="w-full min-w-[480px] text-left text-sm">
+                        <thead>
+                          <tr className="text-xs uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+                            <th className="py-2 pr-3 font-medium">Reps</th>
+                            <th className="py-2 pr-3 font-medium">Weight (lb)</th>
+                            <th className="py-2 pr-3 font-medium">Notes</th>
+                            <th className="py-2 font-medium" />
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {ex.sets.map((s, setIdx) => (
+                            <tr key={setIdx} className="border-t border-zinc-200 dark:border-zinc-800">
+                              <td className="py-2 pr-3 align-top">
+                                <input
+                                  inputMode="numeric"
+                                  className="w-20 rounded-md border border-zinc-200 bg-white px-2 py-1.5 text-sm dark:border-zinc-800 dark:bg-zinc-950"
+                                  value={s.reps}
+                                  onChange={(e) =>
+                                    updateSet(blockIdx, exIdx, setIdx, { reps: e.target.value })
+                                  }
+                                  required
+                                />
+                              </td>
+                              <td className="py-2 pr-3 align-top">
+                                <input
+                                  inputMode="decimal"
+                                  className="w-24 rounded-md border border-zinc-200 bg-white px-2 py-1.5 text-sm dark:border-zinc-800 dark:bg-zinc-950"
+                                  value={s.weight_kg}
+                                  onChange={(e) =>
+                                    updateSet(blockIdx, exIdx, setIdx, { weight_kg: e.target.value })
+                                  }
+                                  placeholder="—"
+                                />
+                              </td>
+                              <td className="py-2 pr-3 align-top">
+                                <input
+                                  className="w-full min-w-[140px] rounded-md border border-zinc-200 bg-white px-2 py-1.5 text-sm dark:border-zinc-800 dark:bg-zinc-950"
+                                  value={s.notes}
+                                  onChange={(e) =>
+                                    updateSet(blockIdx, exIdx, setIdx, { notes: e.target.value })
+                                  }
+                                  placeholder="Optional"
+                                />
+                              </td>
+                              <td className="py-2 align-top text-right">
+                                <button
+                                  type="button"
+                                  onClick={() => removeSet(blockIdx, exIdx, setIdx)}
+                                  className="text-xs font-medium text-red-700 hover:underline dark:text-red-300"
+                                >
+                                  Remove
+                                </button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
         ))}

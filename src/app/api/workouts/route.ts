@@ -15,6 +15,7 @@ export async function GET(request: Request) {
   const url = new URL(request.url);
   const start_date = url.searchParams.get("start_date") ?? undefined;
   const end_date = url.searchParams.get("end_date") ?? undefined;
+  const time_zone = url.searchParams.get("time_zone");
   if ((start_date && !end_date) || (!start_date && end_date)) {
     return NextResponse.json(
       { error: "bad_request", hint: "Provide both start_date and end_date (YYYY-MM-DD) or omit both." },
@@ -32,7 +33,7 @@ export async function GET(request: Request) {
   }
   try {
     const workouts = await listWorkouts(
-      start_date && end_date ? { start_date, end_date } : {},
+      start_date && end_date ? { start_date, end_date, time_zone } : {},
     );
     return NextResponse.json({ workouts });
   } catch (e) {

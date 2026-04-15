@@ -1,98 +1,208 @@
+import { inclusiveLocalDayBoundsAsIso } from "@/lib/datetime/zoned-day-bounds";
 import { getSupabaseServiceRole } from "@/lib/supabase/server";
 import type {
   OuraWorkoutLinkRow,
-  WorkoutExerciseInput,
+  WorkoutBlockInput,
+  WorkoutBlockRow,
+  WorkoutBlockType,
   WorkoutWithChildren,
   WorkoutWriteInput,
 } from "./types";
-
-function isoDayBounds(start_date: string, end_date: string): {
-  start: string;
-  end: string;
-} {
-  return {
-    start: `${start_date}T00:00:00.000Z`,
-    end: `${end_date}T23:59:59.999Z`,
-  };
-}
 
 function assertWorkoutInput(input: WorkoutWriteInput): string | null {
   if (!input.title.trim()) return "title is required.";
   if (!input.started_at) return "started_at is required.";
   const d = Date.parse(input.started_at);
   if (!Number.isFinite(d)) return "started_at must be a valid ISO datetime.";
-  if (!input.exercises.length) return "At least one exercise is required.";
-  for (const ex of input.exercises) {
-    if (!ex.name.trim()) return "Each exercise needs a name.";
-    if (!ex.sets.length) return "Each exercise needs at least one set.";
-    for (const s of ex.sets) {
-      if (!Number.isFinite(s.reps) || s.reps < 0) return "Set reps must be a non-negative number.";
+  if (!input.blocks.length) return "At least one block is required.";
+  for (const block of input.blocks) {
+    if (block.rounds !== null && block.rounds !== undefined) {
+      if (!Number.isFinite(block.rounds) || block.rounds < 1) {
+        return "Block rounds must be a positive integer when set.";
+      }
+    }
+    if (block.rest_seconds !== null && block.rest_seconds !== undefined) {
+      if (!Number.isFinite(block.rest_seconds) || block.rest_seconds < 0) {
+        return "Block rest_seconds must be a non-negative integer when set.";
+      }
+    }
+    const n = block.exercises.length;
+    if (!n) return "Each block needs at least one exercise.";
+    if (block.type === "single" && n !== 1) return "A single block must have exactly one exercise.";
+    if ((block.type === "superset" || block.type === "circuit") && n < 2) {
+      return `${block.type} blocks need at least two exercises.`;
+    }
+    for (const ex of block.exercises) {
+      if (!ex.name.trim()) return "Each exercise needs a name.";
+      if (!ex.sets.length) return "Each exercise needs at least one set.";
+      for (const s of ex.sets) {
+        if (!Number.isFinite(s.reps) || s.reps < 0) return "Set reps must be a non-negative number.";
+      }
     }
   }
   return null;
 }
 
+function sortByPosition<T extends { position: number }>(rows: T[]): T[] {
+  return [...rows].sort((a, b) => a.position - b.position);
+}
+
+async function loadSetsForExerciseIds(
+  exerciseIds: string[],
+): Promise<Map<string, WorkoutBlockRow["exercises"][0]["sets"]>> {
+  const setsByExercise = new Map<string, WorkoutBlockRow["exercises"][0]["sets"]>();
+  if (!exerciseIds.length) return setsByExercise;
+  const sb = getSupabaseServiceRole();
+  const { data: sets, error: sErr } = await sb
+    .from("workout_sets")
+    .select("*")
+    .in("workout_exercise_id", exerciseIds)
+    .order("position", { ascending: true });
+  if (sErr) throw sErr;
+  for (const row of sets ?? []) {
+    const exId = row.workout_exercise_id as string;
+    const list = setsByExercise.get(exId) ?? [];
+    list.push({
+      id: row.id as string,
+      workout_exercise_id: exId,
+      position: row.position as number,
+      reps: row.reps as number,
+      weight_kg: row.weight_kg as number | null,
+      notes: row.notes as string | null,
+    });
+    setsByExercise.set(exId, list);
+  }
+  return setsByExercise;
+}
+
+function assembleWorkoutsWithBlocks(
+  workouts: { id: string; title: string; started_at: string; notes: string | null; created_at: string }[],
+  blockRows: {
+    id: string;
+    workout_id: string;
+    position: number;
+    type: string;
+    name: string | null;
+    rounds: number | null;
+    rest_seconds: number | null;
+  }[],
+  exerciseRows: {
+    id: string;
+    workout_block_id: string;
+    position: number;
+    name: string;
+  }[],
+  setsByExercise: Map<string, WorkoutBlockRow["exercises"][0]["sets"]>,
+): WorkoutWithChildren[] {
+  const exercisesByBlock = new Map<string, WorkoutBlockRow["exercises"]>();
+  const exByBlock = new Map<string, typeof exerciseRows>();
+  for (const row of exerciseRows) {
+    const bid = row.workout_block_id;
+    const list = exByBlock.get(bid) ?? [];
+    list.push(row);
+    exByBlock.set(bid, list);
+  }
+  for (const [bid, rows] of exByBlock) {
+    const sorted = sortByPosition(rows);
+    exercisesByBlock.set(
+      bid,
+      sorted.map((row) => ({
+        id: row.id,
+        workout_block_id: bid,
+        position: row.position,
+        name: row.name,
+        sets: setsByExercise.get(row.id) ?? [],
+      })),
+    );
+  }
+
+  const blocksByWorkoutId = new Map<string, typeof blockRows>();
+  for (const row of blockRows) {
+    const wid = row.workout_id;
+    const list = blocksByWorkoutId.get(wid) ?? [];
+    list.push(row);
+    blocksByWorkoutId.set(wid, list);
+  }
+
+  const blocksByWorkout = new Map<string, WorkoutBlockRow[]>();
+  for (const [wid, rows] of blocksByWorkoutId) {
+    blocksByWorkout.set(
+      wid,
+      sortByPosition(rows).map((row) => ({
+        id: row.id,
+        workout_id: wid,
+        position: row.position,
+        type: row.type as WorkoutBlockType,
+        name: row.name,
+        rounds: row.rounds,
+        rest_seconds: row.rest_seconds,
+        exercises: exercisesByBlock.get(row.id) ?? [],
+      })),
+    );
+  }
+
+  return workouts.map((w) => ({
+    id: w.id,
+    title: w.title,
+    started_at: w.started_at,
+    notes: w.notes,
+    created_at: w.created_at,
+    blocks: blocksByWorkout.get(w.id) ?? [],
+  }));
+}
+
 export async function listWorkouts(params: {
   start_date?: string;
   end_date?: string;
+  time_zone?: string | null;
 }): Promise<WorkoutWithChildren[]> {
   const sb = getSupabaseServiceRole();
   let q = sb.from("workouts").select("*").order("started_at", { ascending: false });
   if (params.start_date && params.end_date) {
-    const { start, end } = isoDayBounds(params.start_date, params.end_date);
+    const { start, end } = inclusiveLocalDayBoundsAsIso(
+      params.start_date,
+      params.end_date,
+      params.time_zone,
+    );
     q = q.gte("started_at", start).lte("started_at", end);
   }
   const { data: workouts, error } = await q;
   if (error) throw error;
   if (!workouts?.length) return [];
   const ids = workouts.map((w) => w.id as string);
-  const { data: exercises, error: eErr } = await sb
-    .from("workout_exercises")
+
+  const { data: blockRows, error: bErr } = await sb
+    .from("workout_blocks")
     .select("*")
-    .in("workout_id", ids)
-    .order("position", { ascending: true });
-  if (eErr) throw eErr;
-  const exerciseIds = (exercises ?? []).map((e) => e.id as string);
-  const setsByExercise = new Map<string, WorkoutWithChildren["exercises"][0]["sets"]>();
-  if (exerciseIds.length) {
-    const { data: sets, error: sErr } = await sb
-      .from("workout_sets")
-      .select("*")
-      .in("workout_exercise_id", exerciseIds)
-      .order("position", { ascending: true });
-    if (sErr) throw sErr;
-    for (const row of sets ?? []) {
-      const exId = row.workout_exercise_id as string;
-      const list = setsByExercise.get(exId) ?? [];
-      list.push({
-        id: row.id as string,
-        workout_exercise_id: exId,
-        position: row.position as number,
-        reps: row.reps as number,
-        weight_kg: row.weight_kg as number | null,
-        notes: row.notes as string | null,
-      });
-      setsByExercise.set(exId, list);
-    }
+    .in("workout_id", ids);
+  if (bErr) throw bErr;
+  const allBlocks = blockRows ?? [];
+
+  const blockIds = allBlocks.map((b) => b.id as string);
+  let exerciseRows: {
+    id: string;
+    workout_block_id: string;
+    position: number;
+    name: string;
+  }[] = [];
+  if (blockIds.length) {
+    const { data: ex, error: eErr } = await sb
+      .from("workout_exercises")
+      .select("id, workout_block_id, position, name")
+      .in("workout_block_id", blockIds);
+    if (eErr) throw eErr;
+    exerciseRows = (ex ?? []) as typeof exerciseRows;
   }
-  const exercisesByWorkout = new Map<string, WorkoutWithChildren["exercises"]>();
-  for (const row of exercises ?? []) {
-    const wid = row.workout_id as string;
-    const exId = row.id as string;
-    const list = exercisesByWorkout.get(wid) ?? [];
-    list.push({
-      id: exId,
-      workout_id: wid,
-      position: row.position as number,
-      name: row.name as string,
-      sets: setsByExercise.get(exId) ?? [],
-    });
-    exercisesByWorkout.set(wid, list);
-  }
-  return (workouts as WorkoutWithChildren[]).map((w) => ({
-    ...(w as unknown as WorkoutWithChildren),
-    exercises: exercisesByWorkout.get(w.id as string) ?? [],
-  }));
+
+  const exerciseIds = exerciseRows.map((e) => e.id);
+  const setsByExercise = await loadSetsForExerciseIds(exerciseIds);
+
+  return assembleWorkoutsWithBlocks(
+    workouts as Parameters<typeof assembleWorkoutsWithBlocks>[0],
+    allBlocks as Parameters<typeof assembleWorkoutsWithBlocks>[1],
+    exerciseRows,
+    setsByExercise,
+  );
 }
 
 export async function getWorkoutById(id: string): Promise<WorkoutWithChildren | null> {
@@ -100,101 +210,115 @@ export async function getWorkoutById(id: string): Promise<WorkoutWithChildren | 
   const { data: w, error } = await sb.from("workouts").select("*").eq("id", id).maybeSingle();
   if (error) throw error;
   if (!w) return null;
-  const { data: exercises, error: eErr } = await sb
-    .from("workout_exercises")
+
+  const { data: blockRows, error: bErr } = await sb
+    .from("workout_blocks")
     .select("*")
     .eq("workout_id", id)
     .order("position", { ascending: true });
-  if (eErr) throw eErr;
-  const exerciseRows = exercises ?? [];
-  const exerciseIds = exerciseRows.map((e) => e.id as string);
-  const setsByExercise = new Map<string, WorkoutWithChildren["exercises"][0]["sets"]>();
-  if (exerciseIds.length) {
-    const { data: sets, error: sErr } = await sb
-      .from("workout_sets")
-      .select("*")
-      .in("workout_exercise_id", exerciseIds)
-      .order("position", { ascending: true });
-    if (sErr) throw sErr;
-    for (const row of sets ?? []) {
-      const exId = row.workout_exercise_id as string;
-      const list = setsByExercise.get(exId) ?? [];
-      list.push({
-        id: row.id as string,
-        workout_exercise_id: exId,
-        position: row.position as number,
-        reps: row.reps as number,
-        weight_kg: row.weight_kg as number | null,
-        notes: row.notes as string | null,
-      });
-      setsByExercise.set(exId, list);
-    }
+  if (bErr) throw bErr;
+  const sortedBlocks = blockRows ?? [];
+  const blockIds = sortedBlocks.map((b) => b.id as string);
+
+  let exerciseRows: {
+    id: string;
+    workout_block_id: string;
+    position: number;
+    name: string;
+  }[] = [];
+  if (blockIds.length) {
+    const { data: ex, error: eErr } = await sb
+      .from("workout_exercises")
+      .select("id, workout_block_id, position, name")
+      .in("workout_block_id", blockIds);
+    if (eErr) throw eErr;
+    exerciseRows = (ex ?? []) as typeof exerciseRows;
   }
-  const exOut: WorkoutWithChildren["exercises"] = exerciseRows.map((row) => {
-    const exId = row.id as string;
-    return {
-      id: exId,
-      workout_id: row.workout_id as string,
-      position: row.position as number,
-      name: row.name as string,
-      sets: setsByExercise.get(exId) ?? [],
-    };
-  });
-  return {
-    id: w.id as string,
-    title: w.title as string,
-    started_at: w.started_at as string,
-    notes: w.notes as string | null,
-    created_at: w.created_at as string,
-    exercises: exOut,
-  };
+
+  const exerciseIds = exerciseRows.map((e) => e.id);
+  const setsByExercise = await loadSetsForExerciseIds(exerciseIds);
+
+  const [assembled] = assembleWorkoutsWithBlocks(
+    [
+      {
+        id: w.id as string,
+        title: w.title as string,
+        started_at: w.started_at as string,
+        notes: w.notes as string | null,
+        created_at: w.created_at as string,
+      },
+    ],
+    sortedBlocks as Parameters<typeof assembleWorkoutsWithBlocks>[1],
+    exerciseRows,
+    setsByExercise,
+  );
+  return assembled ?? null;
 }
 
-async function insertExercisesAndSets(
-  workoutId: string,
-  exercises: WorkoutExerciseInput[],
-): Promise<void> {
+async function insertBlocksAndChildren(workoutId: string, blocks: WorkoutBlockInput[]): Promise<void> {
   const sb = getSupabaseServiceRole();
-  const exerciseRows = exercises.map((e) => ({
+  const sortedBlocks = sortByPosition(blocks);
+  const blockRows = sortedBlocks.map((b) => ({
     workout_id: workoutId,
-    position: e.position,
-    name: e.name.trim(),
+    position: b.position,
+    type: b.type,
+    name: b.name?.trim() ? b.name.trim() : null,
+    rounds: b.rounds ?? null,
+    rest_seconds: b.rest_seconds ?? null,
   }));
-  const { data: insertedEx, error: insExErr } = await sb
-    .from("workout_exercises")
-    .insert(exerciseRows)
+  const { data: insertedBlocks, error: bInsErr } = await sb
+    .from("workout_blocks")
+    .insert(blockRows)
     .select("id, position");
-  if (insExErr) throw insExErr;
-  const byPosition = new Map<number, string>();
-  const sortedEx = [...(insertedEx ?? [])].sort(
-    (a, b) => (a.position as number) - (b.position as number),
-  );
-  for (const row of sortedEx) {
-    byPosition.set(row.position as number, row.id as string);
+  if (bInsErr) throw bInsErr;
+  const blockIdByPosition = new Map<number, string>();
+  for (const row of sortByPosition(insertedBlocks ?? [])) {
+    blockIdByPosition.set(row.position as number, row.id as string);
   }
-  const setRows: {
-    workout_exercise_id: string;
-    position: number;
-    reps: number;
-    weight_kg: number | null;
-    notes: string | null;
-  }[] = [];
-  for (const ex of exercises) {
-    const exId = byPosition.get(ex.position);
-    if (!exId) throw new Error("Failed to resolve inserted exercise id.");
-    for (const s of ex.sets) {
-      setRows.push({
-        workout_exercise_id: exId,
-        position: s.position,
-        reps: s.reps,
-        weight_kg: s.weight_kg ?? null,
-        notes: s.notes?.trim() ? s.notes.trim() : null,
-      });
+
+  for (const block of sortedBlocks) {
+    const blockId = blockIdByPosition.get(block.position);
+    if (!blockId) throw new Error("Failed to resolve inserted block id.");
+
+    const exerciseRows = block.exercises.map((e) => ({
+      workout_block_id: blockId,
+      position: e.position,
+      name: e.name.trim(),
+    }));
+    const { data: insertedEx, error: insExErr } = await sb
+      .from("workout_exercises")
+      .insert(exerciseRows)
+      .select("id, position");
+    if (insExErr) throw insExErr;
+    const exIdByPosition = new Map<number, string>();
+    for (const row of sortByPosition(insertedEx ?? [])) {
+      exIdByPosition.set(row.position as number, row.id as string);
     }
-  }
-  if (setRows.length) {
-    const { error: insSetErr } = await sb.from("workout_sets").insert(setRows);
-    if (insSetErr) throw insSetErr;
+
+    const setRows: {
+      workout_exercise_id: string;
+      position: number;
+      reps: number;
+      weight_kg: number | null;
+      notes: string | null;
+    }[] = [];
+    for (const ex of block.exercises) {
+      const exId = exIdByPosition.get(ex.position);
+      if (!exId) throw new Error("Failed to resolve inserted exercise id.");
+      for (const s of ex.sets) {
+        setRows.push({
+          workout_exercise_id: exId,
+          position: s.position,
+          reps: s.reps,
+          weight_kg: s.weight_kg ?? null,
+          notes: s.notes?.trim() ? s.notes.trim() : null,
+        });
+      }
+    }
+    if (setRows.length) {
+      const { error: insSetErr } = await sb.from("workout_sets").insert(setRows);
+      if (insSetErr) throw insSetErr;
+    }
   }
 }
 
@@ -216,7 +340,7 @@ export async function createWorkout(
   if (error) throw error;
   const workoutId = w.id as string;
   try {
-    await insertExercisesAndSets(workoutId, input.exercises);
+    await insertBlocksAndChildren(workoutId, input.blocks);
   } catch (e) {
     await sb.from("workouts").delete().eq("id", workoutId);
     throw e;
@@ -248,9 +372,9 @@ export async function updateWorkout(
     })
     .eq("id", id);
   if (uErr) throw uErr;
-  const { error: delErr } = await sb.from("workout_exercises").delete().eq("workout_id", id);
+  const { error: delErr } = await sb.from("workout_blocks").delete().eq("workout_id", id);
   if (delErr) throw delErr;
-  await insertExercisesAndSets(id, input.exercises);
+  await insertBlocksAndChildren(id, input.blocks);
   const full = await getWorkoutById(id);
   if (!full) throw new Error("Workout missing after update.");
   return { kind: "ok", workout: full };
@@ -270,9 +394,14 @@ export type OuraLinkWithWorkout = OuraWorkoutLinkRow & {
 export async function listOuraWorkoutLinks(params: {
   start_date: string;
   end_date: string;
+  time_zone?: string | null;
 }): Promise<OuraLinkWithWorkout[]> {
   const sb = getSupabaseServiceRole();
-  const { start, end } = isoDayBounds(params.start_date, params.end_date);
+  const { start, end } = inclusiveLocalDayBoundsAsIso(
+    params.start_date,
+    params.end_date,
+    params.time_zone,
+  );
   const { data, error } = await sb.from("oura_workout_links").select(`
       oura_workout_id,
       workout_id,

@@ -38,13 +38,19 @@ export function LinkPageClient() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [linking, setLinking] = useState(false);
 
+  const clientTimeZone = useMemo(
+    () => Intl.DateTimeFormat().resolvedOptions().timeZone,
+    [],
+  );
+
   const q = useMemo(
     () =>
       new URLSearchParams({
         start_date: range.start_date,
         end_date: range.end_date,
+        time_zone: clientTimeZone,
       }).toString(),
-    [range],
+    [range, clientTimeZone],
   );
 
   const refresh = useCallback(async () => {
@@ -164,6 +170,14 @@ export function LinkPageClient() {
         <h1 className="text-2xl font-semibold text-zinc-900 dark:text-zinc-50">Link workouts</h1>
         <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
           Choose an Oura-detected session and the gym workout you logged for it.
+        </p>
+        <p className="mt-2 text-sm">
+          <Link
+            href="/linked-sessions"
+            className="font-medium text-zinc-800 underline-offset-4 hover:underline dark:text-zinc-200"
+          >
+            View linked sessions
+          </Link>
         </p>
       </div>
 

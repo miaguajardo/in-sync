@@ -45,13 +45,19 @@ export default async function Home({
               <Link className="font-medium underline-offset-4 hover:underline" href="/workouts">
                 Workouts
               </Link>{" "}
-              — exercises, sets, reps, optional weight.
+              — blocks (single, superset, circuit), sets, reps, optional weight.
             </li>
             <li>
               <Link className="font-medium underline-offset-4 hover:underline" href="/oura">
                 Oura hub
               </Link>{" "}
               — workouts from the ring (more data types soon).
+            </li>
+            <li>
+              <Link className="font-medium underline-offset-4 hover:underline" href="/linked-sessions">
+                Sessions
+              </Link>{" "}
+              — see linked Oura + gym workouts as cards.
             </li>
             <li>
               <Link className="font-medium underline-offset-4 hover:underline" href="/link">

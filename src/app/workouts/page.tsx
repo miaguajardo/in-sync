@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { isSupabaseConfigured } from "@/lib/supabase/server";
 import { listWorkouts } from "@/lib/workouts/service";
+import { totalExerciseCount } from "@/lib/workouts/types";
 
 export const dynamic = "force-dynamic";
 
@@ -41,7 +42,7 @@ export default async function WorkoutsPage() {
         <div>
           <h1 className="text-2xl font-semibold text-zinc-900 dark:text-zinc-50">Workouts</h1>
           <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
-            Logged gym sessions with exercises and sets.
+            Logged sessions: singles, supersets, and circuits.
           </p>
         </div>
         <Link
@@ -76,7 +77,8 @@ export default async function WorkoutsPage() {
                 </time>
               </div>
               <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
-                {w.exercises.length} exercise{w.exercises.length === 1 ? "" : "s"}
+                {w.blocks.length} block{w.blocks.length === 1 ? "" : "s"} · {totalExerciseCount(w)} exercise
+                {totalExerciseCount(w) === 1 ? "" : "s"}
               </p>
             </Link>
           </li>

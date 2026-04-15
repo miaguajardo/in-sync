@@ -1,3 +1,5 @@
+export type WorkoutBlockType = "single" | "superset" | "circuit";
+
 export type WorkoutSetInput = {
   position: number;
   reps: number;
@@ -11,11 +13,20 @@ export type WorkoutExerciseInput = {
   sets: WorkoutSetInput[];
 };
 
+export type WorkoutBlockInput = {
+  position: number;
+  type: WorkoutBlockType;
+  name?: string | null;
+  rounds?: number | null;
+  rest_seconds?: number | null;
+  exercises: WorkoutExerciseInput[];
+};
+
 export type WorkoutWriteInput = {
   title: string;
   started_at: string;
   notes?: string | null;
-  exercises: WorkoutExerciseInput[];
+  blocks: WorkoutBlockInput[];
 };
 
 export type WorkoutSetRow = {
@@ -29,10 +40,21 @@ export type WorkoutSetRow = {
 
 export type WorkoutExerciseRow = {
   id: string;
-  workout_id: string;
+  workout_block_id: string;
   position: number;
   name: string;
   sets: WorkoutSetRow[];
+};
+
+export type WorkoutBlockRow = {
+  id: string;
+  workout_id: string;
+  position: number;
+  type: WorkoutBlockType;
+  name: string | null;
+  rounds: number | null;
+  rest_seconds: number | null;
+  exercises: WorkoutExerciseRow[];
 };
 
 export type WorkoutRow = {
@@ -44,7 +66,7 @@ export type WorkoutRow = {
 };
 
 export type WorkoutWithChildren = WorkoutRow & {
-  exercises: WorkoutExerciseRow[];
+  blocks: WorkoutBlockRow[];
 };
 
 export type OuraWorkoutLinkRow = {
@@ -52,3 +74,8 @@ export type OuraWorkoutLinkRow = {
   workout_id: string;
   created_at: string;
 };
+
+/** Total exercises across all blocks (for list summaries). */
+export function totalExerciseCount(w: Pick<WorkoutWithChildren, "blocks">): number {
+  return w.blocks.reduce((n, b) => n + b.exercises.length, 0);
+}

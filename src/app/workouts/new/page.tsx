@@ -24,7 +24,7 @@ export default function NewWorkoutPage() {
       <div>
         <h1 className="text-2xl font-semibold text-zinc-900 dark:text-zinc-50">New workout</h1>
         <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
-          Add exercises, then sets with reps and optional weight.
+          Build blocks: singles, supersets, or circuits. Each exercise has sets (reps, optional weight).
         </p>
       </div>
       <WorkoutForm mode="create" />

@@ -169,9 +169,16 @@ export default async function OuraPage({
       <p className="text-sm text-zinc-600 dark:text-zinc-400">
         Pair sessions on the{" "}
         <Link href="/link" className="font-medium text-zinc-800 underline-offset-4 hover:underline dark:text-zinc-200">
-          link
+          Link
         </Link>{" "}
-        page.
+        page; view pairs on{" "}
+        <Link
+          href="/linked-sessions"
+          className="font-medium text-zinc-800 underline-offset-4 hover:underline dark:text-zinc-200"
+        >
+          Sessions
+        </Link>
+        .
       </p>
     </div>
   );

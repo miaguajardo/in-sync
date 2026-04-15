@@ -20,6 +20,7 @@ export async function GET(request: Request) {
   const url = new URL(request.url);
   const start_date = url.searchParams.get("start_date");
   const end_date = url.searchParams.get("end_date");
+  const time_zone = url.searchParams.get("time_zone");
   if (!start_date || !end_date) {
     return NextResponse.json(
       { error: "bad_request", hint: "Provide start_date and end_date (YYYY-MM-DD)." },
@@ -34,7 +35,7 @@ export async function GET(request: Request) {
     );
   }
   try {
-    const links = await listOuraWorkoutLinks({ start_date, end_date });
+    const links = await listOuraWorkoutLinks({ start_date, end_date, time_zone });
     return NextResponse.json({ links });
   } catch (e) {
     const message = e instanceof Error ? e.message : "unknown_error";
