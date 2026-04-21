@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { SignOutButton } from "@/components/sign-out-button";
 
 const links = [
   { href: "/", label: "Home" },
@@ -8,7 +9,7 @@ const links = [
   { href: "/link", label: "Link" },
 ] as const;
 
-export function AppNav() {
+export function AppNav({ userEmail }: { userEmail: string | null }) {
   return (
     <header className="border-b border-zinc-200 bg-white/80 backdrop-blur dark:border-zinc-800 dark:bg-zinc-950/80">
       <nav className="mx-auto flex w-full max-w-3xl flex-wrap items-center gap-x-4 gap-y-2 px-6 py-3 sm:px-10">
@@ -28,6 +29,23 @@ export function AppNav() {
             </li>
           ))}
         </ul>
+        <div className="ml-auto flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
+          {userEmail ? (
+            <>
+              <span className="max-w-[10rem] truncate text-zinc-500 dark:text-zinc-400" title={userEmail}>
+                {userEmail}
+              </span>
+              <SignOutButton />
+            </>
+          ) : (
+            <Link
+              href="/login"
+              className="font-medium text-zinc-600 underline-offset-4 hover:text-zinc-900 hover:underline dark:text-zinc-400 dark:hover:text-zinc-100"
+            >
+              Sign in
+            </Link>
+          )}
+        </div>
       </nav>
     </header>
   );

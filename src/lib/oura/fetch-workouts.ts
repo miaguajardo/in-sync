@@ -1,3 +1,4 @@
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { getValidOuraAccessToken } from "./access-token";
 import { fetchOuraUserCollection } from "./v2-client";
 import {
@@ -5,15 +6,19 @@ import {
   type OuraWorkoutSummary,
 } from "./workout-models";
 
-export async function fetchOuraWorkoutsForDateRange(input: {
-  start_date: string;
-  end_date: string;
-}): Promise<
+export async function fetchOuraWorkoutsForDateRange(
+  sb: SupabaseClient,
+  userId: string,
+  input: {
+    start_date: string;
+    end_date: string;
+  },
+): Promise<
   | { ok: true; workouts: OuraWorkoutSummary[]; status: number }
   | { ok: false; kind: "not_connected" }
   | { ok: false; kind: "upstream"; status: number; raw?: string }
 > {
-  const accessToken = await getValidOuraAccessToken();
+  const accessToken = await getValidOuraAccessToken(sb, userId);
   if (!accessToken) {
     return { ok: false, kind: "not_connected" };
   }

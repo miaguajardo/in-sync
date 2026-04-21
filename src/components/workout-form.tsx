@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { WorkoutBlockType, WorkoutWithChildren, WorkoutWriteInput } from "@/lib/workouts/types";
 
-type SetDraft = { reps: string; weight_kg: string; notes: string };
+type SetDraft = { reps: string; weight_lb: string; notes: string };
 type ExerciseDraft = { name: string; sets: SetDraft[] };
 
 type BlockDraft = {
@@ -32,7 +32,7 @@ function fromDatetimeLocalValue(value: string): string {
 function defaultExercise(): ExerciseDraft {
   return {
     name: "",
-    sets: [{ reps: "10", weight_kg: "", notes: "" }],
+    sets: [{ reps: "10", weight_lb: "", notes: "" }],
   };
 }
 
@@ -52,7 +52,7 @@ function defaultSupersetBlock(): BlockDraft {
     name: "",
     rounds: "",
     restSeconds: "90",
-    exercises: [defaultExercise(), { name: "", sets: [{ reps: "10", weight_kg: "", notes: "" }] }],
+    exercises: [defaultExercise(), { name: "", sets: [{ reps: "10", weight_lb: "", notes: "" }] }],
   };
 }
 
@@ -64,7 +64,7 @@ function defaultCircuitBlock(): BlockDraft {
     restSeconds: "",
     exercises: [
       defaultExercise(),
-      { name: "", sets: [{ reps: "15", weight_kg: "", notes: "" }] },
+      { name: "", sets: [{ reps: "15", weight_lb: "", notes: "" }] },
     ],
   };
 }
@@ -101,12 +101,12 @@ function buildPayload(
       position: ei,
       name: ex.name,
       sets: ex.sets.map((s, si) => {
-        const wRaw = s.weight_kg.trim();
+        const wRaw = s.weight_lb.trim();
         const wNum = wRaw === "" ? null : Number(wRaw);
         return {
           position: si,
           reps: Math.max(0, Math.floor(Number(s.reps)) || 0),
-          weight_kg: wNum !== null && Number.isFinite(wNum) ? wNum : null,
+          weight_lb: wNum !== null && Number.isFinite(wNum) ? wNum : null,
           notes: s.notes.trim() ? s.notes : null,
         };
       }),
@@ -153,7 +153,7 @@ export function WorkoutForm(props: Props) {
               name: ex.name,
               sets: ex.sets.map((s) => ({
                 reps: String(s.reps),
-                weight_kg: s.weight_kg === null || s.weight_kg === undefined ? "" : String(s.weight_kg),
+                weight_lb: s.weight_lb === null || s.weight_lb === undefined ? "" : String(s.weight_lb),
                 notes: s.notes ?? "",
               })),
             })),
@@ -316,7 +316,7 @@ export function WorkoutForm(props: Props) {
           ...b,
           exercises: b.exercises.map((ex, j) =>
             j === exIdx
-              ? { ...ex, sets: [...ex.sets, { reps: "10", weight_kg: "", notes: "" }] }
+              ? { ...ex, sets: [...ex.sets, { reps: "10", weight_lb: "", notes: "" }] }
               : ex,
           ),
         };
@@ -588,9 +588,9 @@ export function WorkoutForm(props: Props) {
                                 <input
                                   inputMode="decimal"
                                   className="w-24 rounded-md border border-zinc-200 bg-white px-2 py-1.5 text-sm dark:border-zinc-800 dark:bg-zinc-950"
-                                  value={s.weight_kg}
+                                  value={s.weight_lb}
                                   onChange={(e) =>
-                                    updateSet(blockIdx, exIdx, setIdx, { weight_kg: e.target.value })
+                                    updateSet(blockIdx, exIdx, setIdx, { weight_lb: e.target.value })
                                   }
                                   placeholder="—"
                                 />

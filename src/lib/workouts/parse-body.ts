@@ -36,13 +36,13 @@ function parseExercisesArray(raw: unknown, label: string):
       if (!Number.isFinite(reps) || reps < 0) {
         return { ok: false, error: "Each set needs a non-negative reps number." };
       }
-      let weight_kg: number | null | undefined;
-      if (rawSet.weight_kg === null || rawSet.weight_kg === undefined || rawSet.weight_kg === "") {
-        weight_kg = null;
+      let weight_lb: number | null | undefined;
+      if (rawSet.weight_lb === null || rawSet.weight_lb === undefined || rawSet.weight_lb === "") {
+        weight_lb = null;
       } else {
-        const w = typeof rawSet.weight_kg === "number" ? rawSet.weight_kg : Number(rawSet.weight_kg);
-        if (!Number.isFinite(w)) return { ok: false, error: "weight_kg must be a number when set." };
-        weight_kg = w;
+        const w = typeof rawSet.weight_lb === "number" ? rawSet.weight_lb : Number(rawSet.weight_lb);
+        if (!Number.isFinite(w)) return { ok: false, error: "weight_lb must be a number when set." };
+        weight_lb = w;
       }
       const setNotes =
         rawSet.notes === null || rawSet.notes === undefined
@@ -53,7 +53,7 @@ function parseExercisesArray(raw: unknown, label: string):
       sets.push({
         position: setPos++,
         reps,
-        weight_kg: weight_kg ?? null,
+        weight_lb: weight_lb ?? null,
         notes: setNotes,
       });
     }

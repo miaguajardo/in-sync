@@ -34,7 +34,10 @@ export default function PrivacyPage() {
             <p>
               This policy describes how we collect, use, and share information when
               you use this application (&quot;Service&quot;), including when you
-              connect an Oura account via the Oura API.
+              connect an Oura account via the Oura API. Sign-in uses Google via
+              Supabase Auth; gym workouts, Oura link rows, and Oura OAuth tokens are
+              stored per Supabase user account and isolated with database access
+              controls.
             </p>
           </section>
 
@@ -47,9 +50,11 @@ export default function PrivacyPage() {
                 <span className="font-medium text-zinc-800 dark:text-zinc-200">
                   Account and app data:
                 </span>{" "}
-                Information you provide directly (for example, email or profile
-                details if you sign in) and technical data such as device type,
-                browser, and approximate region from standard server logs.
+                When you sign in with Google, Supabase receives an OAuth token and
+                profile identifiers (such as email) according to Google&apos;s
+                disclosures. We also store workout logs and related metadata you
+                enter, plus technical data such as device type, browser, and
+                approximate region from standard server logs.
               </li>
               <li>
                 <span className="font-medium text-zinc-800 dark:text-zinc-200">

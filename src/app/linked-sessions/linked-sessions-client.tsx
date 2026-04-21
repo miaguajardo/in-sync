@@ -367,7 +367,7 @@ function GymColumn({
                           {ex.sets
                             .map((s) => {
                               const w =
-                                s.weight_kg != null ? ` @ ${s.weight_kg} kg` : "";
+                                s.weight_lb != null ? ` @ ${s.weight_lb} lb` : "";
                               return `${s.reps} reps${w}`;
                             })
                             .join(", ")}

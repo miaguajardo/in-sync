@@ -1,5 +1,5 @@
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { inclusiveLocalDayBoundsAsIso } from "@/lib/datetime/zoned-day-bounds";
-import { getSupabaseServiceRole } from "@/lib/supabase/server";
 import type {
   OuraWorkoutLinkRow,
   WorkoutBlockInput,
@@ -48,11 +48,11 @@ function sortByPosition<T extends { position: number }>(rows: T[]): T[] {
 }
 
 async function loadSetsForExerciseIds(
+  sb: SupabaseClient,
   exerciseIds: string[],
 ): Promise<Map<string, WorkoutBlockRow["exercises"][0]["sets"]>> {
   const setsByExercise = new Map<string, WorkoutBlockRow["exercises"][0]["sets"]>();
   if (!exerciseIds.length) return setsByExercise;
-  const sb = getSupabaseServiceRole();
   const { data: sets, error: sErr } = await sb
     .from("workout_sets")
     .select("*")
@@ -67,7 +67,7 @@ async function loadSetsForExerciseIds(
       workout_exercise_id: exId,
       position: row.position as number,
       reps: row.reps as number,
-      weight_kg: row.weight_kg as number | null,
+      weight_lb: row.weight_lb as number | null,
       notes: row.notes as string | null,
     });
     setsByExercise.set(exId, list);
@@ -151,12 +151,14 @@ function assembleWorkoutsWithBlocks(
   }));
 }
 
-export async function listWorkouts(params: {
-  start_date?: string;
-  end_date?: string;
-  time_zone?: string | null;
-}): Promise<WorkoutWithChildren[]> {
-  const sb = getSupabaseServiceRole();
+export async function listWorkouts(
+  sb: SupabaseClient,
+  params: {
+    start_date?: string;
+    end_date?: string;
+    time_zone?: string | null;
+  },
+): Promise<WorkoutWithChildren[]> {
   let q = sb.from("workouts").select("*").order("started_at", { ascending: false });
   if (params.start_date && params.end_date) {
     const { start, end } = inclusiveLocalDayBoundsAsIso(
@@ -195,7 +197,7 @@ export async function listWorkouts(params: {
   }
 
   const exerciseIds = exerciseRows.map((e) => e.id);
-  const setsByExercise = await loadSetsForExerciseIds(exerciseIds);
+  const setsByExercise = await loadSetsForExerciseIds(sb, exerciseIds);
 
   return assembleWorkoutsWithBlocks(
     workouts as Parameters<typeof assembleWorkoutsWithBlocks>[0],
@@ -205,8 +207,10 @@ export async function listWorkouts(params: {
   );
 }
 
-export async function getWorkoutById(id: string): Promise<WorkoutWithChildren | null> {
-  const sb = getSupabaseServiceRole();
+export async function getWorkoutById(
+  sb: SupabaseClient,
+  id: string,
+): Promise<WorkoutWithChildren | null> {
   const { data: w, error } = await sb.from("workouts").select("*").eq("id", id).maybeSingle();
   if (error) throw error;
   if (!w) return null;
@@ -236,7 +240,7 @@ export async function getWorkoutById(id: string): Promise<WorkoutWithChildren | 
   }
 
   const exerciseIds = exerciseRows.map((e) => e.id);
-  const setsByExercise = await loadSetsForExerciseIds(exerciseIds);
+  const setsByExercise = await loadSetsForExerciseIds(sb, exerciseIds);
 
   const [assembled] = assembleWorkoutsWithBlocks(
     [
@@ -255,8 +259,11 @@ export async function getWorkoutById(id: string): Promise<WorkoutWithChildren | 
   return assembled ?? null;
 }
 
-async function insertBlocksAndChildren(workoutId: string, blocks: WorkoutBlockInput[]): Promise<void> {
-  const sb = getSupabaseServiceRole();
+async function insertBlocksAndChildren(
+  sb: SupabaseClient,
+  workoutId: string,
+  blocks: WorkoutBlockInput[],
+): Promise<void> {
   const sortedBlocks = sortByPosition(blocks);
   const blockRows = sortedBlocks.map((b) => ({
     workout_id: workoutId,
@@ -299,7 +306,7 @@ async function insertBlocksAndChildren(workoutId: string, blocks: WorkoutBlockIn
       workout_exercise_id: string;
       position: number;
       reps: number;
-      weight_kg: number | null;
+      weight_lb: number | null;
       notes: string | null;
     }[] = [];
     for (const ex of block.exercises) {
@@ -310,7 +317,7 @@ async function insertBlocksAndChildren(workoutId: string, blocks: WorkoutBlockIn
           workout_exercise_id: exId,
           position: s.position,
           reps: s.reps,
-          weight_kg: s.weight_kg ?? null,
+          weight_lb: s.weight_lb ?? null,
           notes: s.notes?.trim() ? s.notes.trim() : null,
         });
       }
@@ -323,14 +330,16 @@ async function insertBlocksAndChildren(workoutId: string, blocks: WorkoutBlockIn
 }
 
 export async function createWorkout(
+  sb: SupabaseClient,
+  userId: string,
   input: WorkoutWriteInput,
 ): Promise<{ ok: true; workout: WorkoutWithChildren } | { ok: false; error: string }> {
   const err = assertWorkoutInput(input);
   if (err) return { ok: false, error: err };
-  const sb = getSupabaseServiceRole();
   const { data: w, error } = await sb
     .from("workouts")
     .insert({
+      user_id: userId,
       title: input.title.trim(),
       started_at: input.started_at,
       notes: input.notes?.trim() ? input.notes.trim() : null,
@@ -340,17 +349,18 @@ export async function createWorkout(
   if (error) throw error;
   const workoutId = w.id as string;
   try {
-    await insertBlocksAndChildren(workoutId, input.blocks);
+    await insertBlocksAndChildren(sb, workoutId, input.blocks);
   } catch (e) {
     await sb.from("workouts").delete().eq("id", workoutId);
     throw e;
   }
-  const full = await getWorkoutById(workoutId);
+  const full = await getWorkoutById(sb, workoutId);
   if (!full) throw new Error("Workout missing after insert.");
   return { ok: true, workout: full };
 }
 
 export async function updateWorkout(
+  sb: SupabaseClient,
   id: string,
   input: WorkoutWriteInput,
 ): Promise<
@@ -360,8 +370,7 @@ export async function updateWorkout(
 > {
   const err = assertWorkoutInput(input);
   if (err) return { kind: "invalid", error: err };
-  const sb = getSupabaseServiceRole();
-  const existing = await getWorkoutById(id);
+  const existing = await getWorkoutById(sb, id);
   if (!existing) return { kind: "not_found" };
   const { error: uErr } = await sb
     .from("workouts")
@@ -374,14 +383,13 @@ export async function updateWorkout(
   if (uErr) throw uErr;
   const { error: delErr } = await sb.from("workout_blocks").delete().eq("workout_id", id);
   if (delErr) throw delErr;
-  await insertBlocksAndChildren(id, input.blocks);
-  const full = await getWorkoutById(id);
+  await insertBlocksAndChildren(sb, id, input.blocks);
+  const full = await getWorkoutById(sb, id);
   if (!full) throw new Error("Workout missing after update.");
   return { kind: "ok", workout: full };
 }
 
-export async function deleteWorkout(id: string): Promise<boolean> {
-  const sb = getSupabaseServiceRole();
+export async function deleteWorkout(sb: SupabaseClient, id: string): Promise<boolean> {
   const { data, error } = await sb.from("workouts").delete().eq("id", id).select("id");
   if (error) throw error;
   return (data?.length ?? 0) > 0;
@@ -391,12 +399,14 @@ export type OuraLinkWithWorkout = OuraWorkoutLinkRow & {
   workout: { title: string; started_at: string };
 };
 
-export async function listOuraWorkoutLinks(params: {
-  start_date: string;
-  end_date: string;
-  time_zone?: string | null;
-}): Promise<OuraLinkWithWorkout[]> {
-  const sb = getSupabaseServiceRole();
+export async function listOuraWorkoutLinks(
+  sb: SupabaseClient,
+  params: {
+    start_date: string;
+    end_date: string;
+    time_zone?: string | null;
+  },
+): Promise<OuraLinkWithWorkout[]> {
   const { start, end } = inclusiveLocalDayBoundsAsIso(
     params.start_date,
     params.end_date,
@@ -432,11 +442,13 @@ export async function listOuraWorkoutLinks(params: {
     }));
 }
 
-export async function insertOuraWorkoutLink(input: {
-  oura_workout_id: string;
-  workout_id: string;
-}): Promise<{ ok: true } | { ok: false; error: string; code: "conflict" | "fk" | "unknown" }> {
-  const sb = getSupabaseServiceRole();
+export async function insertOuraWorkoutLink(
+  sb: SupabaseClient,
+  input: {
+    oura_workout_id: string;
+    workout_id: string;
+  },
+): Promise<{ ok: true } | { ok: false; error: string; code: "conflict" | "fk" | "unknown" }> {
   const { error } = await sb.from("oura_workout_links").insert({
     oura_workout_id: input.oura_workout_id,
     workout_id: input.workout_id,
@@ -448,8 +460,10 @@ export async function insertOuraWorkoutLink(input: {
   return { ok: false, error: msg, code: "unknown" };
 }
 
-export async function deleteOuraWorkoutLink(oura_workout_id: string): Promise<boolean> {
-  const sb = getSupabaseServiceRole();
+export async function deleteOuraWorkoutLink(
+  sb: SupabaseClient,
+  oura_workout_id: string,
+): Promise<boolean> {
   const { data, error } = await sb
     .from("oura_workout_links")
     .delete()

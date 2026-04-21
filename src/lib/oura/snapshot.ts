@@ -1,6 +1,7 @@
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { DEFAULT_OURA_SCOPES } from "./constants";
 import { getValidOuraAccessToken } from "./access-token";
-import { readOuraTokens } from "./token-store";
+import { readOuraTokensForUser } from "./token-store";
 import { fetchOuraUserCollection } from "./v2-client";
 
 /** One GET probe per OAuth scope we can exercise on v2 (email has no list endpoint). */
@@ -91,6 +92,8 @@ export type SnapshotJson = {
 };
 
 export async function buildOuraSnapshot(
+  sb: SupabaseClient,
+  userId: string,
   searchParams: URLSearchParams,
 ): Promise<{ status: 401 } | { status: 400; error: string } | { status: 200; body: SnapshotJson }> {
   const range = resolveSnapshotRange(searchParams);
@@ -98,12 +101,12 @@ export async function buildOuraSnapshot(
     return { status: 400, error: range.error };
   }
 
-  const accessToken = await getValidOuraAccessToken();
+  const accessToken = await getValidOuraAccessToken(sb, userId);
   if (!accessToken) {
     return { status: 401 };
   }
 
-  const stored = await readOuraTokens();
+  const stored = await readOuraTokensForUser(sb, userId);
   const scopes = parseScopes(stored?.scope);
   const scopes_skipped: string[] = [];
   const probes: { scope: string; collection: string; params: "none" | "date_range" | "datetime_range" }[] =

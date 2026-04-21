@@ -16,7 +16,7 @@ function pickString(v: unknown): string | undefined {
 }
 
 function pickNumber(v: unknown): number | undefined {
-  return typeof v === "number" && Number.isFinite(v) ? v : undefined;
+  return typeof v === "number" && Number.isFinite(v) ? Math.round(v) : undefined;
 }
 
 /** Seconds between ISO datetimes; undefined if missing or not parseable. */

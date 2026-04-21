@@ -3,7 +3,8 @@ import { FUTURE_OURA_COLLECTIONS } from "@/lib/oura/future-collections";
 import { fetchOuraWorkoutsForDateRange } from "@/lib/oura/fetch-workouts";
 import type { OuraWorkoutSummary } from "@/lib/oura/workout-models";
 import { resolveSnapshotRange } from "@/lib/oura/snapshot";
-import { isOuraConnected } from "@/lib/oura/token-store";
+import { isOuraConnectedForUser } from "@/lib/oura/token-store";
+import { createSupabaseServerClient } from "@/lib/supabase/auth-server";
 import { isSupabaseConfigured } from "@/lib/supabase/server";
 import { listOuraWorkoutLinks } from "@/lib/workouts/service";
 
@@ -21,7 +22,14 @@ export default async function OuraPage({
   if (sp.start_date) q.set("start_date", sp.start_date);
   if (sp.end_date) q.set("end_date", sp.end_date);
   const range = resolveSnapshotRange(q);
-  const connected = await isOuraConnected();
+
+  const sb = isSupabaseConfigured() ? await createSupabaseServerClient() : null;
+  const {
+    data: { user },
+  } = sb ? await sb.auth.getUser() : { data: { user: null } };
+
+  const connected =
+    sb && user ? await isOuraConnectedForUser(sb, user.id) : false;
 
   if (!range.ok) {
     return (
@@ -39,8 +47,8 @@ export default async function OuraPage({
 
   let ouraError: string | null = null;
   let workouts: OuraWorkoutSummary[] = [];
-  if (connected) {
-    const out = await fetchOuraWorkoutsForDateRange({
+  if (connected && sb && user) {
+    const out = await fetchOuraWorkoutsForDateRange(sb, user.id, {
       start_date: range.start_date,
       end_date: range.end_date,
     });
@@ -58,9 +66,9 @@ export default async function OuraPage({
   }
 
   const linkedIds = new Set<string>();
-  if (isSupabaseConfigured()) {
+  if (sb && user) {
     try {
-      const links = await listOuraWorkoutLinks({
+      const links = await listOuraWorkoutLinks(sb, {
         start_date: range.start_date,
         end_date: range.end_date,
       });

@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { Geist, Geist_Mono } from "next/font/google";
 import "../../node_modules/tailwindcss/index.css";
+import { getSessionUser } from "@/lib/auth/session";
 import { AppNav } from "./app-nav";
 import "./globals.css";
 
@@ -20,18 +21,21 @@ export const metadata: Metadata = {
   description: "Log gym workouts and tie them to Oura ring data.",
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const user = await getSessionUser();
+  const userEmail = user?.email ?? null;
+
   return (
     <html
       lang="en"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="flex min-h-full flex-col">
-        <AppNav />
+        <AppNav userEmail={userEmail} />
         {children}
         <footer className="border-t border-zinc-200 bg-zinc-50 px-6 py-4 text-center text-sm text-zinc-500 dark:border-zinc-800 dark:bg-black dark:text-zinc-400">
           <nav className="flex flex-wrap items-center justify-center gap-x-4 gap-y-1">

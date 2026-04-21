@@ -1,5 +1,4 @@
-import fs from "fs/promises";
-import path from "path";
+import type { SupabaseClient } from "@supabase/supabase-js";
 
 export type StoredOuraTokens = {
   access_token: string;
@@ -10,32 +9,55 @@ export type StoredOuraTokens = {
   updated_at: string;
 };
 
-function storePath(): string {
-  return (
-    process.env.OURA_TOKEN_STORE_PATH ??
-    path.join(/*turbopackIgnore: true*/ process.cwd(), ".data", "oura-tokens.json")
+function rowToStored(row: Record<string, unknown>): StoredOuraTokens {
+  return {
+    access_token: row.access_token as string,
+    refresh_token: (row.refresh_token as string | null) ?? "",
+    expires_at_ms: Number(row.expires_at_ms),
+    scope: (row.scope as string | null) ?? undefined,
+    updated_at: row.updated_at as string,
+  };
+}
+
+export async function readOuraTokensForUser(
+  sb: SupabaseClient,
+  userId: string,
+): Promise<StoredOuraTokens | null> {
+  const { data, error } = await sb
+    .from("oura_oauth_tokens")
+    .select("access_token, refresh_token, expires_at_ms, scope, updated_at")
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) return null;
+  return rowToStored(data as Record<string, unknown>);
+}
+
+export async function writeOuraTokensForUser(
+  sb: SupabaseClient,
+  userId: string,
+  data: StoredOuraTokens,
+): Promise<void> {
+  const { error } = await sb.from("oura_oauth_tokens").upsert(
+    {
+      user_id: userId,
+      access_token: data.access_token,
+      refresh_token: data.refresh_token || null,
+      expires_at_ms: data.expires_at_ms,
+      scope: data.scope ?? null,
+      updated_at: data.updated_at,
+    },
+    { onConflict: "user_id" },
   );
+  if (error) throw error;
 }
 
-export async function readOuraTokens(): Promise<StoredOuraTokens | null> {
-  const p = storePath();
-  try {
-    const raw = await fs.readFile(p, "utf-8");
-    return JSON.parse(raw) as StoredOuraTokens;
-  } catch {
-    return null;
-  }
-}
-
-export async function writeOuraTokens(data: StoredOuraTokens): Promise<void> {
-  const p = storePath();
-  await fs.mkdir(path.dirname(p), { recursive: true });
-  await fs.writeFile(p, JSON.stringify(data, null, 2), "utf-8");
-}
-
-/** True if we have stored tokens that might still be usable (refresh or unexpired access). */
-export async function isOuraConnected(): Promise<boolean> {
-  const s = await readOuraTokens();
+/** True if stored tokens might still be usable (refresh or unexpired access). */
+export async function isOuraConnectedForUser(
+  sb: SupabaseClient,
+  userId: string,
+): Promise<boolean> {
+  const s = await readOuraTokensForUser(sb, userId);
   if (!s) return false;
   if (s.refresh_token) return true;
   return Date.now() < s.expires_at_ms;

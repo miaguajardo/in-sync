@@ -55,9 +55,10 @@ export default function TermsPage() {
             </h2>
             <p>
               You are responsible for any activity under credentials you use with
-              the Service. When you connect Oura, you represent that you have the
-              right to grant access to the data you share. You may revoke access
-              through Oura or through in-app controls when available.
+              the Service. App access is authenticated with Google (via Supabase);
+              keep your Google account secure. When you connect Oura, you represent
+              that you have the right to grant access to the data you share. You may
+              revoke access through Oura or through in-app controls when available.
             </p>
           </section>
 

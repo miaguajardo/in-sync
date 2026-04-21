@@ -2,6 +2,8 @@ import Link from "next/link";
 
 type Props = {
   connected: boolean;
+  /** When false, show sign-in instead of the Oura authorize link. */
+  canConnectOura: boolean;
   ouraConnected?: string;
   ouraError?: string;
   ouraErrorDescription?: string;
@@ -13,6 +15,8 @@ function messageForError(code: string): string {
       return "Oura connection was cancelled.";
     case "state_mismatch":
       return "Security check failed. Try connecting again from this app.";
+    case "session_mismatch":
+      return "Stay signed in with the same browser when you finish on Oura. Try again after signing in.";
     case "token_exchange_failed":
       return "Could not complete sign-in with Oura. Check server logs and credentials.";
     case "server_misconfigured":
@@ -24,6 +28,7 @@ function messageForError(code: string): string {
 
 export function OuraConnectPanel({
   connected,
+  canConnectOura,
   ouraConnected,
   ouraError,
   ouraErrorDescription,
@@ -52,8 +57,7 @@ export function OuraConnectPanel({
             className="rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-200"
             role="status"
           >
-            Oura account linked. Tokens are stored on the server (see{" "}
-            <code className="text-xs">.data/oura-tokens.json</code> locally).
+            Oura account linked. Tokens are stored for your account in Supabase.
           </p>
         )}
 
@@ -82,12 +86,21 @@ export function OuraConnectPanel({
       </div>
 
       <div className="mt-6">
-        <a
-          href="/api/oura/authorize"
-          className="inline-flex h-11 items-center justify-center rounded-full bg-zinc-900 px-6 text-sm font-medium text-white transition-colors hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
-        >
-          {connected ? "Reconnect Oura" : "Connect Oura"}
-        </a>
+        {canConnectOura ? (
+          <a
+            href="/api/oura/authorize"
+            className="inline-flex h-11 items-center justify-center rounded-full bg-zinc-900 px-6 text-sm font-medium text-white transition-colors hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
+          >
+            {connected ? "Reconnect Oura" : "Connect Oura"}
+          </a>
+        ) : (
+          <Link
+            href="/login?next=%2F"
+            className="inline-flex h-11 items-center justify-center rounded-full border border-zinc-300 bg-white px-6 text-sm font-medium text-zinc-900 transition-colors hover:bg-zinc-50 dark:border-zinc-600 dark:bg-zinc-950 dark:text-zinc-50 dark:hover:bg-zinc-900"
+          >
+            Sign in to connect Oura
+          </Link>
+        )}
       </div>
 
       <p className="mt-4 text-xs text-zinc-500 dark:text-zinc-500">

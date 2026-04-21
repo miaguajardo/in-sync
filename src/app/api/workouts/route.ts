@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+import { requireOuraConnectedOr403 } from "@/lib/auth/require-oura";
+import { requireUserOr401 } from "@/lib/auth/require-user";
 import { isSupabaseConfigured } from "@/lib/supabase/server";
 import { parseWorkoutWriteBody } from "@/lib/workouts/parse-body";
 import { createWorkout, listWorkouts } from "@/lib/workouts/service";
@@ -8,10 +10,18 @@ export const runtime = "nodejs";
 export async function GET(request: Request) {
   if (!isSupabaseConfigured()) {
     return NextResponse.json(
-      { error: "server_misconfigured", hint: "Set NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY." },
+      {
+        error: "server_misconfigured",
+        hint: "Set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY.",
+      },
       { status: 503 },
     );
   }
+  const auth = await requireUserOr401();
+  if (!auth.ok) return auth.response;
+  const oura = await requireOuraConnectedOr403(auth.user, auth.supabase);
+  if (!oura.ok) return oura.response;
+
   const url = new URL(request.url);
   const start_date = url.searchParams.get("start_date") ?? undefined;
   const end_date = url.searchParams.get("end_date") ?? undefined;
@@ -33,6 +43,7 @@ export async function GET(request: Request) {
   }
   try {
     const workouts = await listWorkouts(
+      auth.supabase,
       start_date && end_date ? { start_date, end_date, time_zone } : {},
     );
     return NextResponse.json({ workouts });
@@ -45,10 +56,18 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   if (!isSupabaseConfigured()) {
     return NextResponse.json(
-      { error: "server_misconfigured", hint: "Set NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY." },
+      {
+        error: "server_misconfigured",
+        hint: "Set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY.",
+      },
       { status: 503 },
     );
   }
+  const auth = await requireUserOr401();
+  if (!auth.ok) return auth.response;
+  const oura = await requireOuraConnectedOr403(auth.user, auth.supabase);
+  if (!oura.ok) return oura.response;
+
   let body: unknown;
   try {
     body = await request.json();
@@ -60,7 +79,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "bad_request", hint: parsed.error }, { status: 400 });
   }
   try {
-    const created = await createWorkout(parsed.value);
+    const created = await createWorkout(auth.supabase, auth.user.id, parsed.value);
     if (!created.ok) {
       return NextResponse.json({ error: "bad_request", hint: created.error }, { status: 400 });
     }

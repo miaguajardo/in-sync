@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { createSupabaseServerClient } from "@/lib/supabase/auth-server";
 import { isSupabaseConfigured } from "@/lib/supabase/server";
 import { listWorkouts } from "@/lib/workouts/service";
 import { totalExerciseCount } from "@/lib/workouts/types";
@@ -17,9 +18,10 @@ export default async function WorkoutsPage() {
           </code>{" "}
           and{" "}
           <code className="rounded bg-amber-100/80 px-1 py-0.5 text-xs dark:bg-amber-900/50">
-            SUPABASE_SERVICE_ROLE_KEY
+            NEXT_PUBLIC_SUPABASE_ANON_KEY
           </code>{" "}
-          to <code className="text-xs">.env.local</code>, apply the SQL migration, then reload.
+          to <code className="text-xs">.env.local</code>, apply the SQL migration, enable Google auth in
+          Supabase, then reload.
         </div>
         <Link href="/" className="text-sm font-medium text-zinc-700 underline-offset-4 hover:underline dark:text-zinc-300">
           Back to home
@@ -28,10 +30,11 @@ export default async function WorkoutsPage() {
     );
   }
 
+  const sb = await createSupabaseServerClient();
   let workouts: Awaited<ReturnType<typeof listWorkouts>> = [];
   let error: string | null = null;
   try {
-    workouts = await listWorkouts({});
+    workouts = await listWorkouts(sb, {});
   } catch (e) {
     error = e instanceof Error ? e.message : "Failed to load workouts.";
   }

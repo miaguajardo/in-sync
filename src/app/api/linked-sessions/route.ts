@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+import { requireOuraConnectedOr403 } from "@/lib/auth/require-oura";
+import { requireUserOr401 } from "@/lib/auth/require-user";
 import { fetchOuraWorkoutsForDateRange } from "@/lib/oura/fetch-workouts";
 import type { OuraWorkoutSummary } from "@/lib/oura/workout-models";
 import { resolveSnapshotRange } from "@/lib/oura/snapshot";
@@ -12,10 +14,17 @@ export const runtime = "nodejs";
 export async function GET(request: Request) {
   if (!isSupabaseConfigured()) {
     return NextResponse.json(
-      { error: "server_misconfigured", hint: "Set NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY." },
+      {
+        error: "server_misconfigured",
+        hint: "Set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY.",
+      },
       { status: 503 },
     );
   }
+  const auth = await requireUserOr401();
+  if (!auth.ok) return auth.response;
+  const oura = await requireOuraConnectedOr403(auth.user, auth.supabase);
+  if (!oura.ok) return oura.response;
 
   const url = new URL(request.url);
   const range = resolveSnapshotRange(url.searchParams);
@@ -25,7 +34,7 @@ export async function GET(request: Request) {
   const time_zone = url.searchParams.get("time_zone");
 
   try {
-    const links = await listOuraWorkoutLinks({
+    const links = await listOuraWorkoutLinks(auth.supabase, {
       start_date: range.start_date,
       end_date: range.end_date,
       time_zone,
@@ -35,7 +44,7 @@ export async function GET(request: Request) {
     const gymById = new Map<string, WorkoutWithChildren | null>();
     await Promise.all(
       workoutIds.map(async (id) => {
-        gymById.set(id, await getWorkoutById(id));
+        gymById.set(id, await getWorkoutById(auth.supabase, id));
       }),
     );
 
@@ -43,7 +52,7 @@ export async function GET(request: Request) {
     let oura_status: "ok" | "not_connected" | "upstream" = "ok";
     let oura_error: string | undefined;
 
-    const ouraOut = await fetchOuraWorkoutsForDateRange({
+    const ouraOut = await fetchOuraWorkoutsForDateRange(auth.supabase, auth.user.id, {
       start_date: range.start_date,
       end_date: range.end_date,
     });

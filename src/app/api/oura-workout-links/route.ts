@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+import { requireOuraConnectedOr403 } from "@/lib/auth/require-oura";
+import { requireUserOr401 } from "@/lib/auth/require-user";
 import { fetchOuraWorkoutsForDateRange, ouraWorkoutIds } from "@/lib/oura/fetch-workouts";
 import { resolveSnapshotRange } from "@/lib/oura/snapshot";
 import { isSupabaseConfigured } from "@/lib/supabase/server";
@@ -13,10 +15,18 @@ export const runtime = "nodejs";
 export async function GET(request: Request) {
   if (!isSupabaseConfigured()) {
     return NextResponse.json(
-      { error: "server_misconfigured", hint: "Set NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY." },
+      {
+        error: "server_misconfigured",
+        hint: "Set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY.",
+      },
       { status: 503 },
     );
   }
+  const auth = await requireUserOr401();
+  if (!auth.ok) return auth.response;
+  const oura = await requireOuraConnectedOr403(auth.user, auth.supabase);
+  if (!oura.ok) return oura.response;
+
   const url = new URL(request.url);
   const start_date = url.searchParams.get("start_date");
   const end_date = url.searchParams.get("end_date");
@@ -35,7 +45,7 @@ export async function GET(request: Request) {
     );
   }
   try {
-    const links = await listOuraWorkoutLinks({ start_date, end_date, time_zone });
+    const links = await listOuraWorkoutLinks(auth.supabase, { start_date, end_date, time_zone });
     return NextResponse.json({ links });
   } catch (e) {
     const message = e instanceof Error ? e.message : "unknown_error";
@@ -46,10 +56,18 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   if (!isSupabaseConfigured()) {
     return NextResponse.json(
-      { error: "server_misconfigured", hint: "Set NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY." },
+      {
+        error: "server_misconfigured",
+        hint: "Set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY.",
+      },
       { status: 503 },
     );
   }
+  const auth = await requireUserOr401();
+  if (!auth.ok) return auth.response;
+  const ouraGate = await requireOuraConnectedOr403(auth.user, auth.supabase);
+  if (!ouraGate.ok) return ouraGate.response;
+
   let body: unknown;
   try {
     body = await request.json();
@@ -76,23 +94,26 @@ export async function POST(request: Request) {
   if (!range.ok) {
     return NextResponse.json({ error: "bad_request", hint: range.error }, { status: 400 });
   }
-  const oura = await fetchOuraWorkoutsForDateRange({
+  const ouraFetch = await fetchOuraWorkoutsForDateRange(auth.supabase, auth.user.id, {
     start_date: range.start_date,
     end_date: range.end_date,
   });
-  if (!oura.ok) {
-    if (oura.kind === "not_connected") {
+  if (!ouraFetch.ok) {
+    if (ouraFetch.kind === "not_connected") {
       return NextResponse.json(
         { error: "not_connected", hint: "Complete OAuth via /api/oura/authorize" },
         { status: 401 },
       );
     }
     return NextResponse.json(
-      { error: "oura_upstream", status: oura.status },
+      {
+        error: "oura_upstream",
+        status: ouraFetch.status,
+      },
       { status: 502 },
     );
   }
-  if (!ouraWorkoutIds(oura.workouts).has(oura_workout_id)) {
+  if (!ouraWorkoutIds(ouraFetch.workouts).has(oura_workout_id)) {
     return NextResponse.json(
       {
         error: "oura_workout_not_in_range",
@@ -102,7 +123,7 @@ export async function POST(request: Request) {
     );
   }
   try {
-    const ins = await insertOuraWorkoutLink({ oura_workout_id, workout_id });
+    const ins = await insertOuraWorkoutLink(auth.supabase, { oura_workout_id, workout_id });
     if (!ins.ok) {
       const status = ins.code === "conflict" ? 409 : ins.code === "fk" ? 400 : 500;
       return NextResponse.json({ error: ins.code, hint: ins.error }, { status });
@@ -117,10 +138,18 @@ export async function POST(request: Request) {
 export async function DELETE(request: Request) {
   if (!isSupabaseConfigured()) {
     return NextResponse.json(
-      { error: "server_misconfigured", hint: "Set NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY." },
+      {
+        error: "server_misconfigured",
+        hint: "Set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY.",
+      },
       { status: 503 },
     );
   }
+  const auth = await requireUserOr401();
+  if (!auth.ok) return auth.response;
+  const oura = await requireOuraConnectedOr403(auth.user, auth.supabase);
+  if (!oura.ok) return oura.response;
+
   const url = new URL(request.url);
   const oura_workout_id = url.searchParams.get("oura_workout_id")?.trim() ?? "";
   if (!oura_workout_id) {
@@ -130,7 +159,7 @@ export async function DELETE(request: Request) {
     );
   }
   try {
-    const deleted = await deleteOuraWorkoutLink(oura_workout_id);
+    const deleted = await deleteOuraWorkoutLink(auth.supabase, oura_workout_id);
     if (!deleted) {
       return NextResponse.json({ error: "not_found" }, { status: 404 });
     }

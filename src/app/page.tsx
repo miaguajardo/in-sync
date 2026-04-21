@@ -1,5 +1,8 @@
 import Link from "next/link";
-import { isOuraConnected } from "@/lib/oura/token-store";
+import { getSessionUser } from "@/lib/auth/session";
+import { isOuraConnectedForUser } from "@/lib/oura/token-store";
+import { createSupabaseServerClient } from "@/lib/supabase/auth-server";
+import { isSupabaseConfigured } from "@/lib/supabase/server";
 import { OuraConnectPanel } from "./oura-connect-panel";
 
 type SearchParams = {
@@ -14,7 +17,12 @@ export default async function Home({
   searchParams: Promise<SearchParams>;
 }) {
   const sp = await searchParams;
-  const connected = await isOuraConnected();
+  const user = await getSessionUser();
+  let connected = false;
+  if (user && isSupabaseConfigured()) {
+    const sb = await createSupabaseServerClient();
+    connected = await isOuraConnectedForUser(sb, user.id);
+  }
 
   return (
     <div className="flex flex-col flex-1 bg-zinc-50 font-sans dark:bg-black">
@@ -30,6 +38,7 @@ export default async function Home({
 
         <OuraConnectPanel
           connected={connected}
+          canConnectOura={!!user}
           ouraConnected={sp.oura_connected}
           ouraError={sp.oura_error}
           ouraErrorDescription={sp.oura_error_description}
@@ -45,7 +54,7 @@ export default async function Home({
               <Link className="font-medium underline-offset-4 hover:underline" href="/workouts">
                 Workouts
               </Link>{" "}
-              — blocks (single, superset, circuit), sets, reps, optional weight.
+              — blocks (single, superset, circuit), sets, reps, optional weight (lb).
             </li>
             <li>
               <Link className="font-medium underline-offset-4 hover:underline" href="/oura">
@@ -67,11 +76,7 @@ export default async function Home({
             </li>
           </ul>
           <p className="mt-3 text-xs text-zinc-500 dark:text-zinc-500">
-            Supabase stores gym data; Oura tokens stay in{" "}
-            <code className="rounded bg-zinc-100 px-1 py-0.5 text-[0.7rem] dark:bg-zinc-900">
-              .data/oura-tokens.json
-            </code>{" "}
-            locally until you move them to the cloud.
+            Sign in with Google. Gym workouts and Oura tokens are stored per account in Supabase.
           </p>
         </section>
 

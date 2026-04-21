@@ -3,7 +3,7 @@ export type WorkoutBlockType = "single" | "superset" | "circuit";
 export type WorkoutSetInput = {
   position: number;
   reps: number;
-  weight_kg?: number | null;
+  weight_lb?: number | null;
   notes?: string | null;
 };
 
@@ -34,7 +34,7 @@ export type WorkoutSetRow = {
   workout_exercise_id: string;
   position: number;
   reps: number;
-  weight_kg: number | null;
+  weight_lb: number | null;
   notes: string | null;
 };
 

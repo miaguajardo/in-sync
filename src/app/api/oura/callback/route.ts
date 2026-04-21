@@ -4,23 +4,33 @@ import {
   exchangeAuthorizationCode,
   tokenResponseToStored,
 } from "@/lib/oura/oauth-client";
-import { OURA_STATE_COOKIE } from "@/lib/oura/constants";
-import { writeOuraTokens } from "@/lib/oura/token-store";
+import {
+  OURA_POST_NEXT_COOKIE,
+  OURA_STATE_COOKIE,
+  OURA_USER_COOKIE,
+} from "@/lib/oura/constants";
+import { safeNextPath } from "@/lib/onboarding/safe-next-path";
+import { writeOuraTokensForUser } from "@/lib/oura/token-store";
+import { createSupabaseServerClient } from "@/lib/supabase/auth-server";
 
 export const runtime = "nodejs";
 
-function redirectHome(
+function redirectOnboarding(
   origin: string,
   query: Record<string, string | undefined>,
-  clearStateCookie: boolean,
+  nextPath: string,
+  clearOuraCookies: boolean,
 ) {
-  const home = new URL("/", origin);
+  const u = new URL("/onboarding", origin);
+  u.searchParams.set("next", safeNextPath(nextPath));
   for (const [k, v] of Object.entries(query)) {
-    if (v !== undefined) home.searchParams.set(k, v);
+    if (v !== undefined) u.searchParams.set(k, v);
   }
-  const res = NextResponse.redirect(home);
-  if (clearStateCookie) {
+  const res = NextResponse.redirect(u);
+  if (clearOuraCookies) {
     res.cookies.delete(OURA_STATE_COOKIE);
+    res.cookies.delete(OURA_USER_COOKIE);
+    res.cookies.delete(OURA_POST_NEXT_COOKIE);
   }
   return res;
 }
@@ -36,6 +46,9 @@ export async function GET(request: Request) {
 
   const jar = await cookies();
   const cookieState = jar.get(OURA_STATE_COOKIE)?.value ?? null;
+  const cookieUserId = jar.get(OURA_USER_COOKIE)?.value ?? null;
+  const cookieNext = jar.get(OURA_POST_NEXT_COOKIE)?.value ?? null;
+  const nextPath = safeNextPath(cookieNext);
 
   const stateOk =
     cookieState !== null &&
@@ -44,17 +57,27 @@ export async function GET(request: Request) {
     state.length > 0 &&
     cookieState === state;
 
+  const supabase = await createSupabaseServerClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  const userOk =
+    user !== null &&
+    cookieUserId !== null &&
+    cookieUserId.length > 0 &&
+    user.id === cookieUserId;
+
+  if (!userOk) {
+    return redirectOnboarding(origin, { oura_error: "session_mismatch" }, nextPath, true);
+  }
+
   if (error) {
     if (!stateOk) {
-      return redirectHome(
-        origin,
-        { oura_error: "state_mismatch" },
-        true,
-      );
+      return redirectOnboarding(origin, { oura_error: "state_mismatch" }, nextPath, true);
     }
     const q: Record<string, string | undefined> = { oura_error: error };
     if (description) q.oura_error_description = description;
-    return redirectHome(origin, q, true);
+    return redirectOnboarding(origin, q, nextPath, true);
   }
 
   if (!code) {
@@ -65,25 +88,26 @@ export async function GET(request: Request) {
   }
 
   if (!stateOk) {
-    return redirectHome(origin, { oura_error: "state_mismatch" }, true);
+    return redirectOnboarding(origin, { oura_error: "state_mismatch" }, nextPath, true);
   }
 
   const redirectUri = process.env.OURA_REDIRECT_URI;
   if (!redirectUri) {
-    return redirectHome(
-      origin,
-      { oura_error: "server_misconfigured" },
-      true,
-    );
+    return redirectOnboarding(origin, { oura_error: "server_misconfigured" }, nextPath, true);
   }
 
   try {
     const json = await exchangeAuthorizationCode(code, redirectUri);
     const stored = tokenResponseToStored(json, scope);
-    await writeOuraTokens(stored);
+    await writeOuraTokensForUser(supabase, user.id, stored);
   } catch {
-    return redirectHome(origin, { oura_error: "token_exchange_failed" }, true);
+    return redirectOnboarding(origin, { oura_error: "token_exchange_failed" }, nextPath, true);
   }
 
-  return redirectHome(origin, { oura_connected: "1" }, true);
+  const dest = new URL(nextPath, origin);
+  const res = NextResponse.redirect(dest);
+  res.cookies.delete(OURA_STATE_COOKIE);
+  res.cookies.delete(OURA_USER_COOKIE);
+  res.cookies.delete(OURA_POST_NEXT_COOKIE);
+  return res;
 }

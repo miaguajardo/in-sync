@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+import { requireOuraConnectedOr403 } from "@/lib/auth/require-oura";
+import { requireUserOr401 } from "@/lib/auth/require-user";
 import { isSupabaseConfigured } from "@/lib/supabase/server";
 import { parseWorkoutWriteBody } from "@/lib/workouts/parse-body";
 import { deleteWorkout, getWorkoutById, updateWorkout } from "@/lib/workouts/service";
@@ -10,13 +12,21 @@ type Ctx = { params: Promise<{ id: string }> };
 export async function GET(_request: Request, ctx: Ctx) {
   if (!isSupabaseConfigured()) {
     return NextResponse.json(
-      { error: "server_misconfigured", hint: "Set NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY." },
+      {
+        error: "server_misconfigured",
+        hint: "Set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY.",
+      },
       { status: 503 },
     );
   }
+  const auth = await requireUserOr401();
+  if (!auth.ok) return auth.response;
+  const oura = await requireOuraConnectedOr403(auth.user, auth.supabase);
+  if (!oura.ok) return oura.response;
+
   const { id } = await ctx.params;
   try {
-    const workout = await getWorkoutById(id);
+    const workout = await getWorkoutById(auth.supabase, id);
     if (!workout) {
       return NextResponse.json({ error: "not_found" }, { status: 404 });
     }
@@ -30,10 +40,18 @@ export async function GET(_request: Request, ctx: Ctx) {
 export async function PATCH(request: Request, ctx: Ctx) {
   if (!isSupabaseConfigured()) {
     return NextResponse.json(
-      { error: "server_misconfigured", hint: "Set NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY." },
+      {
+        error: "server_misconfigured",
+        hint: "Set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY.",
+      },
       { status: 503 },
     );
   }
+  const auth = await requireUserOr401();
+  if (!auth.ok) return auth.response;
+  const oura = await requireOuraConnectedOr403(auth.user, auth.supabase);
+  if (!oura.ok) return oura.response;
+
   const { id } = await ctx.params;
   let body: unknown;
   try {
@@ -46,7 +64,7 @@ export async function PATCH(request: Request, ctx: Ctx) {
     return NextResponse.json({ error: "bad_request", hint: parsed.error }, { status: 400 });
   }
   try {
-    const updated = await updateWorkout(id, parsed.value);
+    const updated = await updateWorkout(auth.supabase, id, parsed.value);
     if (updated.kind === "not_found") {
       return NextResponse.json({ error: "not_found" }, { status: 404 });
     }
@@ -63,13 +81,21 @@ export async function PATCH(request: Request, ctx: Ctx) {
 export async function DELETE(_request: Request, ctx: Ctx) {
   if (!isSupabaseConfigured()) {
     return NextResponse.json(
-      { error: "server_misconfigured", hint: "Set NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY." },
+      {
+        error: "server_misconfigured",
+        hint: "Set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY.",
+      },
       { status: 503 },
     );
   }
+  const auth = await requireUserOr401();
+  if (!auth.ok) return auth.response;
+  const oura = await requireOuraConnectedOr403(auth.user, auth.supabase);
+  if (!oura.ok) return oura.response;
+
   const { id } = await ctx.params;
   try {
-    const deleted = await deleteWorkout(id);
+    const deleted = await deleteWorkout(auth.supabase, id);
     if (!deleted) {
       return NextResponse.json({ error: "not_found" }, { status: 404 });
     }
